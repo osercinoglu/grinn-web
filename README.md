@@ -1,7 +1,7 @@
 # gRINN Web Service
-# A web-based interface for the gRINN molecular dynamics analysis tool
+# A web-based interface for gRINN
 
-This repository contains a web service implementation of gRINN (Gromacs-based Residue Interaction Network) that allows users to submit computational jobs through a web interface and retrieve results without needing to install or configure local Docker environments.
+This repository contains a web service implementation of gRINN (get Residue Interaction Energies and Networks) that allows users to submit computational jobs through a web interface and retrieve results without needing to install or configure local Docker environments.
 
 ## Architecture
 
