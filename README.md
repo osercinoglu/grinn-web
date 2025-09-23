@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # gRINN Web Service
 # A web-based interface for the gRINN molecular dynamics analysis tool
 
