@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # Redis for job queue and caching
+  redis:
+    image: redis:7.2-alpine
+    container_name: grinn-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend service
+  frontend:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.frontend
+    container_name: grinn-frontend
+    ports:
+      - "8050:8050"
+    environment:
+      - FRONTEND_HOST=0.0.0.0
+      - FRONTEND_PORT=8050
+      - FRONTEND_DEBUG=false
+      - BACKEND_HOST=backend
+      - BACKEND_PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - redis
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8050/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API service
+  backend:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.backend
+    container_name: grinn-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=5000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_PATH=/app/gcs-credentials.json
+      - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
+    volumes:
+      - ${GCS_CREDENTIALS_PATH}:/app/gcs-credentials.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - redis
+    restart: unless-stopped
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "backend.api:app"]
+
+  # Celery worker for job processing
+  worker:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.backend
+    container_name: grinn-worker
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_PATH=/app/gcs-credentials.json
+      - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
+      - WORKER_ID=worker-1
+    volumes:
+      - ${GCS_CREDENTIALS_PATH}:/app/gcs-credentials.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - worker_temp:/tmp
+    depends_on:
+      - redis
+    restart: unless-stopped
+    command: ["celery", "-A", "backend.worker", "worker", "--loglevel=info", "--queues=grinn_jobs", "--concurrency=2"]
+
+  # Celery flower for monitoring (optional)
+  flower:
+    build:
+      context: ..
+      dockerfile: config/Dockerfile.backend
+    container_name: grinn-flower
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+    depends_on:
+      - redis
+    restart: unless-stopped
+    command: ["celery", "-A", "backend.worker", "flower", "--port=5555"]
+    profiles:
+      - monitoring
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: grinn-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  redis_data:
+    driver: local
+  worker_temp:
+    driver: local
+
+networks:
+  default:
+    name: grinn-network
