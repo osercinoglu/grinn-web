@@ -1,0 +1,80 @@
+services:
+  # gRINN Computational Worker(s) for Remote Deployment
+  # This can be scaled to multiple workers: docker-compose up --scale worker=3
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      # Database connection to frontend server
+      - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@${FRONTEND_HOST}:5432/grinn_web
+      
+      # Redis connection to frontend server  
+      - REDIS_HOST=${FRONTEND_HOST}
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      
+      # Google Cloud Storage configuration
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+      
+      # Worker identification
+      - WORKER_FACILITY=${WORKER_FACILITY:-facility-1}
+      - WORKER_ID=${HOSTNAME}
+      
+      # gRINN Docker image for computational jobs
+      - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
+      - DOCKER_TIMEOUT=7200  # 2 hours for long computations
+      
+      # Development mode (false for production)
+      - DEVELOPMENT_MODE=false
+      
+    volumes:
+      # GCS credentials for accessing Google Cloud Storage
+      - ./secrets:/app/secrets:ro
+      
+      # Docker socket for running gRINN containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      
+      # Temporary storage for job processing
+      - worker_temp:/tmp/grinn-jobs
+      
+      # Worker logs
+      - worker_logs:/app/logs
+      
+    # Scale workers based on facility capacity
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: '${WORKER_CPU_LIMIT:-4.0}'
+          memory: ${WORKER_MEMORY_LIMIT:-8G}
+        reservations:
+          cpus: '${WORKER_CPU_RESERVATION:-2.0}'
+          memory: ${WORKER_MEMORY_RESERVATION:-4G}
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    restart: unless-stopped
+    
+    # Optional: connect to frontend network if on same host
+    # networks:
+    #   - grinn-frontend
+
+volumes:
+  worker_temp:
+    driver: local
+  worker_logs:
+    driver: local
+
+# Uncomment if workers are on the same host as frontend
+# networks:
+#   grinn-frontend:
+#     external: true

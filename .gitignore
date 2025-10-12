@@ -50,11 +50,16 @@ logs/
 # macOS
 .DS_Store
 
-# Secrets
+# Secrets and credentials
 secrets/
 *.pem
 *.key
 *.crt
+*credentials*.json
+
+# Environment files (user-specific)
+.env.frontend
+.env.worker
 
 # Temporary files
 *.tmp
@@ -66,3 +71,7 @@ tmp/
 *.bak
 *_old.*
 *_backup.*
+*-old.*
+
+# Development/test artifacts
+grinn-worker.log

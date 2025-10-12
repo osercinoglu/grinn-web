@@ -1,6 +1,16 @@
-# gRINN Web Service
+# i-gRINN Web Service
 
-A comprehensive web-based interface for the gRINN (graph-based Residue Interaction Network) molecular dynamics analysis tool with persistent job storage and real-time monitoring.
+A comprehensive and interactive web interface for the gRINN (get Residue iNteraction eNergies and Networks) tool with persistent job storage and distributed processing capabilities.
+
+## ✨ Key Features
+
+- 🚀 **Easy Job Submission** - Upload trajectory files and configure analysis parameters
+- 📊 **Real-time Monitoring** - Track job progress with dedicated monitoring pages  
+- 🔒 **Privacy Controls** - Option to hide job details from public queue
+- 💾 **Persistent Storage** - Jobs and results saved with full history
+- 🐳 **Docker Integration** - Containerized gRINN processing with scaling support
+- 🌐 **Web Dashboard** - Interactive interface for job management
+- 🏢 **Distributed Architecture** - Frontend and workers can run at different facilities
 
 ## Overview
 
@@ -10,10 +20,11 @@ This service provides a complete web-based solution for:
 - **Persistent job storage** with PostgreSQL database
 - **Real-time job monitoring** with bookmark-able URLs
 - **Dedicated monitoring pages** for individual jobs
+- **Distributed processing** with remote computational workers
 - Visualizing results through an interactive dashboard
 - Downloading analysis results
 
-## 🚀 New Features
+## 🚀 Features
 
 ### Database-Driven Job Management
 - **PostgreSQL integration** for persistent job storage
@@ -34,23 +45,223 @@ This service provides a complete web-based solution for:
 - Progress bars with smooth transitions
 - Error reporting with detailed troubleshooting information
 
-## 📋 Docker Deployment Guide
+### Distributed Architecture
+- **Frontend hosting** - Web interface, database, and job queue
+- **Remote workers** - Computational facilities can host processing nodes
+- **Scalable processing** - Multiple workers at different locations
+- **Network connectivity** - Secure connections between frontend and workers
 
-The gRINN Web Service is designed to run entirely in Docker containers for production deployment. This approach provides:
+## 📋 Deployment Options
 
-- **Complete isolation** of all dependencies
-- **Easy scaling** of computational workers
-- **Consistent deployment** across different environments
-- **Integration** with existing gRINN Docker images
+The gRINN Web Service supports three deployment modes:
+
+### 1. Distributed Production Deployment (Recommended)
+
+This architecture separates the frontend (web interface, database, job queue) from computational workers, allowing workers to run at remote facilities while the frontend can be hosted anywhere.
+
+**Frontend Server:**
+- Web interface (Dash + Flask)
+- PostgreSQL database
+- Redis job queue
+- gRINN Dashboard
+
+**Remote Workers:**
+- Celery workers
+- Docker containers for gRINN processing  
+- Network connection to frontend services
+
+### 2. Single-Host Docker Deployment
+
+Traditional deployment where all components run on a single machine.
+
+### 3. Development Setup
+
+Local development with Conda environment and mock services.
+
+---
+
+## 🏢 Distributed Production Deployment
+
+### Architecture Overview
+
+```
+Frontend Server (Public)          Remote Facility Workers
+├── Web Interface (Port 80/443)   ├── Worker 1 (gRINN Processing)
+├── PostgreSQL (Port 5432) ←──────┼── Worker 2 (gRINN Processing)  
+├── Redis Queue (Port 6379) ←─────├── Worker 3 (gRINN Processing)
+└── gRINN Dashboard               └── ... (Scalable)
+```
 
 ### Prerequisites
 
-- **Docker** (version 20.10+) and **Docker Compose** (version 2.0+)
+**Frontend Server:**
+- Docker & Docker Compose
+- Public network access for web interface
+- Open ports for worker connections (5432, 6379)
+
+**Worker Facilities:**
+- Docker installed
+- Network access to frontend server
+- gRINN Docker image
+
+### Frontend Deployment
+
+1. **Clone and setup:**
+   ```bash
+   git clone https://github.com/osercinoglu/grinn-web.git
+   cd grinn-web
+   ```
+
+2. **Configure environment:**
+   ```bash
+   # Copy frontend environment template
+   cp .env.frontend.example .env.frontend
+   
+   # Edit configuration
+   nano .env.frontend
+   ```
+
+3. **Setup credentials (Production only):**
+   ```bash
+   mkdir -p secrets
+   # Add your GCS credentials
+   cp /path/to/your/gcs-credentials.json secrets/
+   ```
+
+4. **Deploy frontend:**
+   ```bash
+   # Make deployment script executable
+   chmod +x deploy-frontend.sh
+   
+   # Deploy frontend services
+   ./deploy-frontend.sh
+   ```
+
+5. **Verify deployment:**
+   ```bash
+   # Check service health
+   docker-compose -f docker-compose.frontend.yml ps
+   
+   # View logs
+   docker-compose -f docker-compose.frontend.yml logs webapp
+   ```
+
+### Worker Deployment
+
+Deploy at each computational facility:
+
+1. **Setup worker environment:**
+   ```bash
+   # Clone repository at worker facility
+   git clone https://github.com/osercinoglu/grinn-web.git
+   cd grinn-web
+   
+   # Copy worker environment template
+   cp .env.worker.example .env.worker
+   
+   # Configure frontend connection
+   nano .env.worker
+   ```
+
+2. **Configure worker connection:**
+   ```bash
+   # In .env.worker, set:
+   FRONTEND_HOST=your.frontend.server.ip
+   FACILITY_NAME=facility-1
+   WORKER_COUNT=2
+   ```
+
+3. **Deploy workers:**
+   ```bash
+   # Make deployment script executable  
+   chmod +x deploy-worker.sh
+   
+   # Deploy worker services
+   ./deploy-worker.sh
+   ```
+
+4. **Verify worker connection:**
+   ```bash
+   # Check worker health
+   docker-compose -f docker-compose.worker.yml ps
+   
+   # View worker logs
+   docker-compose -f docker-compose.worker.yml logs worker
+   ```
+
+### Alternative: Standalone Worker
+
+For maximum flexibility, use the standalone worker script:
+
+```bash
+# At each worker facility
+python standalone-worker.py \
+    --frontend-host your.frontend.server.ip \
+    --facility facility-1 \
+    --gcs-bucket your-bucket-name \
+    --gcs-project your-project-id
+```
+
+### Network Requirements
+
+**Frontend Server Firewall:**
+```bash
+# Allow worker connections
+sudo ufw allow 5432/tcp  # PostgreSQL
+sudo ufw allow 6379/tcp  # Redis
+sudo ufw allow 80/tcp    # Web interface
+sudo ufw allow 443/tcp   # HTTPS (if configured)
+```
+
+**Security Considerations:**
+- Use strong passwords for Redis and PostgreSQL
+- Consider VPN connections for sensitive facilities
+- Implement IP-based access controls if needed
+- Use HTTPS for web interface in production
+
+### Monitoring
+
+**Frontend Monitoring:**
+```bash
+# Check all services
+docker-compose -f docker-compose.frontend.yml ps
+
+# Monitor logs
+docker-compose -f docker-compose.frontend.yml logs -f webapp
+
+# Database status
+docker-compose -f docker-compose.frontend.yml exec postgres psql -U grinn_user -d grinn_web -c "SELECT count(*) FROM jobs;"
+```
+
+**Worker Monitoring:**
+```bash
+# At each facility
+docker-compose -f docker-compose.worker.yml ps
+docker-compose -f docker-compose.worker.yml logs -f worker
+```
+
+**Job Queue Monitoring:**
+```bash
+# Connect to Redis
+docker-compose -f docker-compose.frontend.yml exec redis redis-cli
+> INFO
+> LLEN grinn_tasks  # Check queue length
+```
+
+---
+
+## 🐳 Single-Host Docker Deployment
+
+For traditional single-machine deployment:
+
+### Prerequisites
+
+- **Docker** (version 20.10+) and **Docker Compose** (version 2.0+)  
 - **Git** for repository management
 - **8GB+ RAM** recommended for computational jobs
 - **gRINN Docker image** (from the main gRINN repository)
 
-### Quick Start (Recommended)
+### Quick Start
 
 1. **Clone the repository:**
    ```bash
@@ -77,391 +288,318 @@ The gRINN Web Service is designed to run entirely in Docker containers for produ
    ```bash
    # Start the complete stack
    docker-compose up -d
-   
-   # Check status
+   ```
+
+5. **Verify deployment:**
+   ```bash
+   # Check service health
    docker-compose ps
-   ```
-
-5. **Access the web interface:**
-   - **Frontend Dashboard:** http://localhost:8051
-   - **Backend API:** http://localhost:8050/api/health
-   - **gRINN Dashboard:** http://localhost:8052 (if available)
-
-### Architecture Overview
-
-The Docker deployment consists of these containers:
-
-#### 🌐 **webapp** - Web Application Container
-- **Purpose:** Combined frontend (Dash) and backend (Flask API) 
-- **Ports:** 8050 (API), 8051 (Dashboard)
-- **Features:** Job submission, monitoring, file upload
-- **Scaling:** Single instance (stateless)
-
-#### ⚙️ **worker** - Computational Worker Container  
-- **Purpose:** Processes gRINN computational jobs using Docker-in-Docker
-- **Features:** Celery-based job processing, gRINN Docker integration
-- **Scaling:** Multiple workers (configurable replicas)
-- **Resource:** CPU/memory intensive operations
-
-#### 📊 **grinn-dashboard** - Visualization Container
-- **Purpose:** Dedicated gRINN results visualization (from main gRINN repo)
-- **Port:** 8052
-- **Features:** Interactive network analysis, result exploration
-- **Integration:** Shared volumes with worker results
-
-#### 🗄️ **postgres** - Database Container
-- **Purpose:** Persistent job storage and metadata
-- **Port:** 5432 
-- **Features:** Job history, status tracking, user data
-
-#### 🔄 **redis** - Queue Container  
-- **Purpose:** Celery task queue and result backend
-- **Port:** 6379
-- **Features:** Job queuing, distributed task management
-
-### Configuration
-
-#### Environment Variables (.env file)
-
-```bash
-# Database Settings
-POSTGRES_PASSWORD=secure_password_here
-
-# Storage Configuration  
-DEVELOPMENT_MODE=false  # Set to true for mock storage
-GCS_BUCKET_NAME=your-production-bucket
-GCS_PROJECT_ID=your-gcp-project-id
-
-# Security
-SECRET_KEY=your-super-secret-key-generate-new-one
-
-# Docker Images
-GRINN_DOCKER_IMAGE=grinn:latest
-GRINN_DASHBOARD_IMAGE=grinn-dashboard:latest
-```
-
-#### Production Storage Setup
-
-For production deployment with Google Cloud Storage:
-
-1. **Create GCS credentials:**
-   ```bash
-   # Place your GCS service account JSON in secrets/
-   cp /path/to/your/gcs-credentials.json secrets/gcs-credentials.json
-   ```
-
-2. **Update environment:**
-   ```bash
-   # In .env file
-   DEVELOPMENT_MODE=false
-   GCS_BUCKET_NAME=your-production-bucket
-   GCS_PROJECT_ID=your-gcp-project-id
-   ```
-
-#### Development Setup (Mock Storage)
-
-For development without GCS:
-
-```bash
-# In .env file
-DEVELOPMENT_MODE=true
-GCS_BUCKET_NAME=mock-bucket
-GCS_PROJECT_ID=mock-project
-```
-
-### Building Components
-
-#### 1. Build gRINN Dashboard Image
-
-First, ensure you have the main gRINN repository:
-
-```bash
-# Clone gRINN repository (if not already available)
-cd ..
-git clone https://github.com/your-org/grinn.git
-cd grinn
-
-# Build gRINN dashboard image
-docker build -t grinn-dashboard:latest .
-cd ../grinn-web
-```
-
-#### 2. Build Web Service Images
-
-```bash
-# Build webapp container (frontend + backend)
-docker build -f Dockerfile.webapp -t grinn-webapp:latest .
-
-# Build worker container  
-docker build -f Dockerfile.worker -t grinn-worker:latest .
-
-# Or use the build script
-./build-docker.sh
-```
-
-### Service Management
-
-#### Start Services
-```bash
-# Start all services
-docker-compose up -d
-
-# Start specific services
-docker-compose up -d postgres redis
-docker-compose up -d webapp
-docker-compose up -d worker
-
-# View logs
-docker-compose logs -f webapp
-docker-compose logs -f worker
-```
-
-#### Scale Workers
-```bash
-# Scale to 4 worker containers
-docker-compose up -d --scale worker=4
-
-# Check worker status
-docker-compose ps worker
-```
-
-#### Stop Services
-```bash
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes (⚠️ deletes data)
-docker-compose down -v
-```
-
-### Production Deployment
-
-#### With Nginx Reverse Proxy
-
-For production with SSL and domain names:
-
-```bash
-# Start with production profile (includes nginx)
-docker-compose --profile production up -d
-
-# Configure SSL certificates in docker/ssl/
-# Update docker/nginx.conf with your domain
-```
-
-#### Health Monitoring
-
-All containers include health checks:
-
-```bash
-# Check container health
-docker-compose ps
-
-# View health check logs
-docker inspect grinn-web_webapp_1 | grep -A 10 Health
-```
-
-#### Backup and Restore
-
-```bash
-# Backup database
-docker-compose exec postgres pg_dump -U grinn_user grinn_web > backup.sql
-
-# Restore database  
-docker-compose exec -T postgres psql -U grinn_user grinn_web < backup.sql
-
-# Backup volumes
-docker run --rm -v grinn-web_postgres_data:/data -v $(pwd):/backup ubuntu tar czf /backup/postgres_backup.tar.gz /data
-```
-
-### Troubleshooting
-
-#### Common Issues
-
-1. **Port conflicts:**
-   ```bash
-   # Check what's using ports
-   netstat -tulpn | grep :8050
    
-   # Modify ports in docker-compose.yml if needed
-   ```
-
-2. **Container startup failures:**
-   ```bash
-   # Check logs
+   # View application logs
    docker-compose logs webapp
-   docker-compose logs worker
+   ```
+
+6. **Access the service:**
+   - **Main Interface:** http://localhost:8050
+   - **Job Queue:** http://localhost:8050/queue  
+   - **gRINN Dashboard:** http://localhost:8051
+
+### Production Configuration
+
+For production deployment, configure:
+
+1. **Google Cloud Storage (Recommended):**
+   ```bash
+   # Add your GCS credentials
+   cp /path/to/your/service-account.json secrets/gcs-credentials.json
    
-   # Check container status
-   docker-compose ps
+   # Update .env with your GCS settings:
+   GCS_BUCKET_NAME=your-bucket-name
+   GCS_PROJECT_ID=your-project-id
+   DEVELOPMENT_MODE=false
    ```
 
-3. **Database connection issues:**
+2. **Security settings:**
    ```bash
-   # Test database connectivity
-   docker-compose exec webapp python -c "from shared.database import DatabaseManager; print('OK' if DatabaseManager().test_connection() else 'FAIL')"
+   # Generate strong passwords in .env
+   POSTGRES_PASSWORD=your-secure-password
+   REDIS_PASSWORD=your-redis-password
    ```
 
-4. **Worker job processing:**
-   ```bash
-   # Check Celery workers
-   docker-compose exec worker celery -A backend.tasks inspect active
-   
-   # Monitor task queue
-   docker-compose exec redis redis-cli monitor
-   ```
-
-#### Performance Tuning
-
-1. **Worker scaling:**
-   ```bash
-   # Adjust worker replicas based on load
-   docker-compose up -d --scale worker=6
-   ```
-
-2. **Resource limits:**
+3. **Resource limits:**
    ```yaml
-   # Add to docker-compose.yml
-   worker:
-     deploy:
-       resources:
-         limits:
-           memory: 4G
-           cpus: '2.0'
+   # Adjust in docker-compose.yml
+   services:
+     worker:
+       deploy:
+         resources:
+           limits:
+             memory: 4G
+             cpus: '2'
    ```
 
-3. **Database optimization:**
-   ```bash
-   # Increase PostgreSQL shared buffers
-   # Add to postgres environment:
-   POSTGRES_INITDB_ARGS: "--shared_buffers=256MB"
-   ```
+---
 
-### Integration with gRINN Repository
+## 🔧 Development Setup
 
-The web service integrates with Docker images from the main gRINN repository:
-
-1. **gRINN computational engine:** Used by workers for trajectory analysis
-2. **gRINN dashboard:** Provides visualization interface for results
-3. **Shared data volumes:** Results flow between worker and dashboard containers
-
-### Monitoring and Logs
-
-- **Application logs:** Available in container volumes
-- **Database logs:** PostgreSQL container logs  
-- **Worker logs:** Celery worker output
-- **Queue monitoring:** Redis CLI or web interfaces
-- **Health endpoints:** Built-in health checks for all services
-
-## 🔧 Development Setup (Alternative)
-
-For development without Docker, you can still run the services directly:
+For local development without Docker:
 
 ### Prerequisites
-- Python 3.10+, PostgreSQL, Redis
-- Conda/Miniconda environment
 
-### Quick Development Setup
-```bash
-# Create conda environment
-conda create -n grinn-web python=3.10 -y
-conda activate grinn-web
+- **Python 3.8+** with conda/miniconda
+- **PostgreSQL** (optional - SQLite used by default)
+- **Redis** (optional - in-memory broker used by default)
 
-# Install dependencies
-pip install -r requirements.txt
+### Setup
 
-# Setup database
-createdb grinn_web
-python -c "from shared.database import DatabaseManager; DatabaseManager().init_db()"
+1. **Clone and create environment:**
+   ```bash
+   git clone https://github.com/osercinoglu/grinn-web.git
+   cd grinn-web
+   
+   # Create conda environment
+   conda create -n grinn-web python=3.10
+   conda activate grinn-web
+   ```
 
-# Start services (3 terminals)
-# Terminal 1: Backend API
-python backend/api.py
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-# Terminal 2: Frontend Dashboard  
-python frontend/app.py
+3. **Configure for development:**
+   ```bash
+   cp .env.example .env
+   
+   # Edit .env to enable development mode:
+   DEVELOPMENT_MODE=true
+   DATABASE_URL=sqlite:///./dev-jobs.db
+   ```
 
-# Terminal 3: Celery Worker
-celery -A backend.tasks worker --loglevel=info
-```
+4. **Run services:**
+   ```bash
+   # Terminal 1: Start Celery worker (for job processing)
+   celery -A backend.tasks worker --loglevel=info
+   
+   # Terminal 2: Start web application
+   python frontend/app.py
+   ```
 
-**Note:** Docker deployment is strongly recommended for production use.
+5. **Access the application:**
+   - **Main Interface:** http://localhost:8050
+   - **Job Queue:** http://localhost:8050/queue
 
-### Next Steps
+### Development Features
 
-- Set up monitoring and alerting (Prometheus/Grafana)
-- Configure automated backups
-- Implement user authentication
-- Set up CI/CD pipelines for updates
-- Configure log aggregation (ELK stack)
+- **Hot reloading** - Code changes reload automatically
+- **Mock storage** - No GCS credentials required
+- **SQLite database** - No PostgreSQL setup needed
+- **In-memory job queue** - No Redis required
+- **Debug mode** - Detailed error information
 
-## Architecture
+---
 
-The web service consists of:
+## 🚀 Usage Guide
 
-### Frontend
-- **Dash-based Web Interface**: Interactive job submission form with file upload capabilities
-- **Job Monitoring**: Real-time status tracking and progress visualization  
-- **Results Visualization**: Integration with gRINN dashboard for result exploration
-- **Styling**: Matches the existing gRINN dashboard aesthetic
+### Job Submission
 
-### Backend
-- **Job Queue System**: Celery-based distributed task queue with Redis
-- **Google Cloud Storage**: Secure file upload/download with unique job IDs
-- **Docker Integration**: Containerized gRINN execution environment
-- **Error Handling**: Comprehensive error reporting and job management
+1. **Upload Files:**
+   - Structure file (PDB/GRO format)
+   - Trajectory file (XTC format)
 
-### Shared Components
-- **Data Models**: Common data structures and validation schemas
-- **Utilities**: Helper functions for file handling, job management, and cloud operations
-- **Configuration**: Environment-specific settings and secrets management
+2. **Configure Parameters:**
+   - Residue selection (default: all)
+   - Analysis type
+   - Privacy settings
 
-## Directory Structure
+3. **Submit and Monitor:**
+   - Job redirects to monitoring page
+   - Bookmark the URL for later access
+   - Real-time progress updates
+
+### Privacy Controls
+
+- **Public Jobs:** Visible in job queue, accessible to all users
+- **Private Jobs:** Hidden from public queue, accessible only via direct URL
+
+### Monitoring
+
+- **Individual Job Monitoring:** `/monitor/{job_id}`
+- **Job Queue Overview:** `/queue`
+- **Real-time Updates:** Automatic refresh every 3 seconds
+
+### Results
+
+- **Interactive Dashboard:** Visualize interaction networks
+- **Download Results:** CSV files and analysis outputs
+- **Persistent Storage:** Results available indefinitely
+
+---
+
+## 📁 Project Structure
 
 ```
 grinn-web/
-├── frontend/           # Dash web application
-│   ├── app.py         # Main frontend application
-│   ├── components/    # Reusable UI components
-│   ├── assets/        # CSS, images, and static files
-│   └── pages/         # Multi-page application structure
-├── backend/           # Backend worker services
-│   ├── worker.py      # Celery worker for job processing
-│   ├── tasks/         # Task definitions and processing logic
-│   └── grinn_runner/  # Docker-based gRINN execution wrapper
-├── shared/            # Common utilities and models
-│   ├── models.py      # Data models and schemas
-│   ├── storage.py     # Google Cloud Storage utilities
-│   ├── queue.py       # Job queue management
-│   └── config.py      # Configuration management
-├── config/            # Configuration files
-│   ├── docker-compose.yml  # Service orchestration
-│   ├── Dockerfile.frontend # Frontend container
-│   ├── Dockerfile.backend  # Backend container
-│   └── requirements/       # Python dependencies
-└── docs/              # Documentation and setup guides
+├── frontend/                    # Dash web application
+│   ├── app.py                  # Main web interface
+│   └── assets/                 # CSS styling
+├── backend/                     # Flask API and tasks
+│   ├── api.py                  # REST API endpoints
+│   └── tasks.py                # Celery task definitions
+├── shared/                      # Shared utilities
+│   ├── models.py               # Database models
+│   ├── database.py             # Database utilities
+│   └── storage.py              # File storage utilities
+├── docker-compose.yml           # Single-host deployment
+├── docker-compose.frontend.yml  # Frontend-only deployment
+├── docker-compose.worker.yml    # Worker-only deployment
+├── standalone-worker.py         # Standalone worker script
+├── deploy-frontend.sh          # Frontend deployment script
+├── deploy-worker.sh            # Worker deployment script
+└── .env.frontend/.env.worker   # Environment configurations
 ```
 
-## Workflow
+---
 
-1. **Job Submission**: User uploads input files through web interface
-2. **Cloud Storage**: Files uploaded to Google Cloud Storage with unique job ID
-3. **Queue Processing**: Job queued for backend worker processing
-4. **Computation**: Backend downloads files, runs gRINN in Docker container
-5. **Result Upload**: Computation results uploaded back to cloud storage
-6. **Notification**: Frontend notified of job completion status
-7. **Visualization**: Results integrated with gRINN dashboard for exploration
+## 🔍 Troubleshooting
 
-## Setup and Installation
+### Common Issues
 
-See the detailed setup guide in `docs/setup.md` for local development and production deployment instructions.
+**Job Status "Processing" but not progressing:**
+```bash
+# Check worker logs
+docker-compose logs worker
 
-## Security Considerations
+# Check Celery worker status
+docker-compose exec webapp celery -A backend.tasks inspect active
+```
 
-- Unique job IDs prevent unauthorized access to user data
-- Google Cloud Storage provides secure, time-limited access tokens
-- Docker containers provide isolation for computational workloads
-- Input validation prevents malicious file uploads
+**Database connection errors:**
+```bash
+# Check PostgreSQL status
+docker-compose exec postgres pg_isready
 
-## Contributing
+# Reset database
+docker-compose down
+docker volume rm grinn-web_postgres_data
+docker-compose up -d
+```
 
-Please see `CONTRIBUTING.md` for development guidelines and contribution process.
+**File upload issues:**
+```bash
+# Check storage configuration in .env
+cat .env | grep -E "(GCS|DEVELOPMENT)"
+
+# Check mounted volumes
+docker-compose exec webapp ls -la /app/uploads/
+```
+
+**Worker connection issues (Distributed mode):**
+```bash
+# Test network connectivity from worker facility
+nc -zv <frontend-host> 5432  # PostgreSQL
+nc -zv <frontend-host> 6379  # Redis
+
+# Check firewall settings on frontend server
+sudo ufw status
+```
+
+### Distributed Deployment Debugging
+
+**Frontend Issues:**
+```bash
+# Check service accessibility from worker network
+docker-compose -f docker-compose.frontend.yml exec postgres pg_isready
+docker-compose -f docker-compose.frontend.yml exec redis redis-cli ping
+
+# Monitor connections
+docker-compose -f docker-compose.frontend.yml logs -f postgres | grep connection
+```
+
+**Worker Issues:**
+```bash
+# Check worker connection to frontend
+docker-compose -f docker-compose.worker.yml exec worker ping <frontend-host>
+
+# Monitor task processing
+docker-compose -f docker-compose.worker.yml logs -f worker | grep "Received task"
+```
+
+### Performance Tuning
+
+**For High-Volume Processing:**
+```yaml
+# Increase worker concurrency in docker-compose.worker.yml
+services:
+  worker:
+    command: ["celery", "-A", "backend.tasks", "worker", "--concurrency=4"]
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4'
+```
+
+**Database Optimization:**
+```bash
+# Monitor database performance
+docker-compose -f docker-compose.frontend.yml exec postgres psql -U grinn_user -d grinn_web -c "
+SELECT COUNT(*) as total_jobs, status, 
+       AVG(EXTRACT(epoch FROM (completed_at - started_at))) as avg_duration_seconds
+FROM jobs 
+WHERE status = 'completed'
+GROUP BY status;"
+```
+
+### Logs and Debugging
+
+**Application Logs:**
+```bash
+# Frontend logs
+docker-compose -f docker-compose.frontend.yml logs -f webapp
+
+# Worker logs  
+docker-compose -f docker-compose.worker.yml logs -f worker
+
+# Database logs
+docker-compose -f docker-compose.frontend.yml logs postgres
+```
+
+**Job Debugging:**
+```bash
+# Check specific job in database
+docker-compose -f docker-compose.frontend.yml exec postgres psql -U grinn_user -d grinn_web -c "
+SELECT id, status, error_message, created_at, started_at, completed_at 
+FROM jobs 
+WHERE id = 'your-job-id';"
+```
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+## 🆘 Support
+
+- **Issues:** [GitHub Issues](https://github.com/osercinoglu/grinn-web/issues)
+- **Documentation:** This README and inline code comments
+- **gRINN Tool:** [Main gRINN Repository](https://github.com/osercinoglu/grinn)
+
+For deployment assistance or questions about distributed setups, please open an issue with:
+- Deployment mode (single-host/distributed)
+- Error messages and logs  
+- Network configuration details
+- Hardware specifications
