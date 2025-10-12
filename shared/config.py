@@ -14,12 +14,12 @@ class Config:
     
     # Frontend settings
     frontend_host: str = "0.0.0.0"
-    frontend_port: int = 8050
+    frontend_port: int = 8051
     frontend_debug: bool = False
     
     # Backend settings
     backend_host: str = "0.0.0.0"
-    backend_port: int = 5000
+    backend_port: int = 8050
     
     # Redis/Celery settings
     redis_host: str = "localhost"
@@ -38,8 +38,9 @@ class Config:
     docker_timeout: int = 3600  # 1 hour default timeout
     
     # Job settings
-    max_file_size_mb: int = 500
-    job_retention_days: int = 7
+    max_trajectory_file_size_mb: int = 100
+    max_other_file_size_mb: int = 10
+    job_retention_days: int = 3  # Results kept for 3 days only
     max_concurrent_jobs: int = 10
     
     # Security settings
@@ -82,7 +83,8 @@ class Config:
         self.docker_timeout = int(os.getenv("DOCKER_TIMEOUT", self.docker_timeout))
         
         # Job settings
-        self.max_file_size_mb = int(os.getenv("MAX_FILE_SIZE_MB", self.max_file_size_mb))
+        self.max_trajectory_file_size_mb = int(os.getenv("MAX_TRAJECTORY_FILE_SIZE_MB", self.max_trajectory_file_size_mb))
+        self.max_other_file_size_mb = int(os.getenv("MAX_OTHER_FILE_SIZE_MB", self.max_other_file_size_mb))
         self.job_retention_days = int(os.getenv("JOB_RETENTION_DAYS", self.job_retention_days))
         self.max_concurrent_jobs = int(os.getenv("MAX_CONCURRENT_JOBS", self.max_concurrent_jobs))
         
@@ -97,18 +99,20 @@ class Config:
         # Create upload folder if it doesn't exist
         os.makedirs(self.upload_folder, exist_ok=True)
     
-    def validate(self):
+    def validate(self, skip_gcs_validation=False):
         """Validate configuration and raise errors for missing required settings."""
         errors = []
         
-        if not self.gcs_bucket_name:
-            errors.append("GCS_BUCKET_NAME is required")
-        
-        if not self.gcs_project_id:
-            errors.append("GCS_PROJECT_ID is required")
-        
-        if not self.gcs_credentials_path or not os.path.exists(self.gcs_credentials_path):
-            errors.append("GCS_CREDENTIALS_PATH must point to a valid credentials file")
+        # Skip GCS validation in development mode
+        if not skip_gcs_validation:
+            if not self.gcs_bucket_name:
+                errors.append("GCS_BUCKET_NAME is required")
+            
+            if not self.gcs_project_id:
+                errors.append("GCS_PROJECT_ID is required")
+            
+            if not self.gcs_credentials_path or not os.path.exists(self.gcs_credentials_path):
+                errors.append("GCS_CREDENTIALS_PATH must point to a valid credentials file")
         
         if errors:
             raise ValueError(f"Configuration errors: {', '.join(errors)}")

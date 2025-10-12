@@ -1,0 +1,36 @@
+# Core web framework dependencies
+flask==3.1.1
+dash==3.1.1
+dash-bootstrap-components==2.0.3
+plotly==6.2.0
+
+# Data processing
+pandas==2.3.1
+numpy==1.26.4
+
+# Database
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# Task queue
+celery==5.4.0
+redis==5.2.1
+
+# HTTP requests
+requests==2.32.4
+
+# Configuration
+python-dotenv==1.0.1
+
+# Docker client
+docker==7.1.0
+
+# Google Cloud (optional for production)
+google-cloud-storage==2.20.0
+
+# Development and testing
+pytest==8.3.4
+pytest-cov==6.0.0
+black==24.10.0
+flake8==7.1.1

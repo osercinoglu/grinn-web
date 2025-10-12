@@ -1,0 +1,148 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: grinn_web
+      POSTGRES_USER: grinn_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-grinn_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grinn_user -d grinn_web"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis for job queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # gRINN Web Application (Frontend + Backend API)
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    ports:
+      - "8050:8050"  # Backend API
+      - "8051:8051"  # Frontend Dashboard
+    environment:
+      - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@postgres:5432/grinn_web
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8050
+      - FRONTEND_HOST=0.0.0.0
+      - FRONTEND_PORT=8051
+      - DEVELOPMENT_MODE=false
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+    volumes:
+      - ./secrets:/app/secrets:ro
+      - webapp_logs:/app/logs
+      - webapp_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8050/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # gRINN Computational Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@postgres:5432/grinn_web
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
+      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./secrets:/app/secrets:ro
+      - worker_logs:/app/logs
+      - worker_results:/app/results
+      - grinn_shared:/shared  # Shared volume with gRINN dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+
+  # gRINN Dashboard Service (from grinn repository)
+  grinn-dashboard:
+    image: ${GRINN_DASHBOARD_IMAGE:-grinn-dashboard:latest}
+    ports:
+      - "8052:8052"
+    environment:
+      - DASHBOARD_PORT=8052
+      - DASHBOARD_HOST=0.0.0.0
+    volumes:
+      - grinn_shared:/shared:ro  # Shared volume with worker results
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8052/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy (optional for production)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - webapp
+      - grinn-dashboard
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+  redis_data:
+  webapp_logs:
+  webapp_uploads:
+  worker_logs:
+  worker_results:
+  grinn_shared:
+
+networks:
+  default:
+    driver: bridge

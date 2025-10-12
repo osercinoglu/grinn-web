@@ -23,11 +23,12 @@ class FileType(Enum):
     """Supported input file types."""
     PDB = "pdb"
     XTC = "xtc"
+    TRR = "trr"  # Additional trajectory format
     TPR = "tpr"
-    MDP = "mdp"
     GRO = "gro"
     TOP = "top"
     ITP = "itp"
+    RTP = "rtp"  # Topology description files
 
 @dataclass
 class JobFile:
@@ -44,42 +45,22 @@ class JobFile:
 
 @dataclass
 class JobParameters:
-    """gRINN job execution parameters."""
-    # Simulation parameters
-    simulation_time_ns: float = 100.0
-    temperature_k: float = 310.0
-    pressure_bar: float = 1.0
+    """gRINN job execution parameters for trajectory analysis."""
+    # Trajectory analysis parameters
+    skip_frames: int = 1
+    initpairfilter_cutoff: float = 12.0
     
-    # Analysis parameters
-    energy_cutoff: float = -1.0
-    distance_cutoff_nm: float = 0.5
-    interaction_types: List[str] = field(default_factory=lambda: ["total", "vdw", "elec"])
-    
-    # Network analysis parameters
-    network_threshold: float = -2.0
-    include_backbone: bool = True
-    residue_selection: Optional[str] = None
-    
-    # Output options
-    generate_plots: bool = True
-    generate_network: bool = True
-    output_format: List[str] = field(default_factory=lambda: ["csv", "json"])
+    # Selection parameters
+    source_sel: Optional[str] = None  # Source residue selection
+    target_sel: Optional[str] = None  # Target residue selection
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
-            "simulation_time_ns": self.simulation_time_ns,
-            "temperature_k": self.temperature_k,
-            "pressure_bar": self.pressure_bar,
-            "energy_cutoff": self.energy_cutoff,
-            "distance_cutoff_nm": self.distance_cutoff_nm,
-            "interaction_types": self.interaction_types,
-            "network_threshold": self.network_threshold,
-            "include_backbone": self.include_backbone,
-            "residue_selection": self.residue_selection,
-            "generate_plots": self.generate_plots,
-            "generate_network": self.generate_network,
-            "output_format": self.output_format
+            "skip_frames": self.skip_frames,
+            "initpairfilter_cutoff": self.initpairfilter_cutoff,
+            "source_sel": self.source_sel,
+            "target_sel": self.target_sel
         }
     
     @classmethod
@@ -102,6 +83,7 @@ class Job:
     # Job configuration
     job_name: Optional[str] = None
     description: Optional[str] = None
+    is_private: bool = False  # Whether job details should be hidden in public queue
     parameters: JobParameters = field(default_factory=JobParameters)
     
     # Files
@@ -245,6 +227,7 @@ class JobSubmissionRequest:
     job_name: str
     description: Optional[str] = None
     user_email: Optional[str] = None
+    is_private: bool = False
     parameters: Optional[Dict[str, Any]] = None
     
     def to_job(self) -> Job:
@@ -253,6 +236,7 @@ class JobSubmissionRequest:
         job.job_name = self.job_name
         job.description = self.description
         job.user_email = self.user_email
+        job.is_private = self.is_private
         
         if self.parameters:
             job.parameters = JobParameters.from_dict(self.parameters)

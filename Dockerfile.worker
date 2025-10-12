@@ -1,0 +1,47 @@
+# Docker image for gRINN Web Worker
+# This container processes computational jobs
+
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    docker.io \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd --create-home --shell /bin/bash grinn
+WORKDIR /app
+RUN chown grinn:grinn /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY --chown=grinn:grinn . /app/
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/uploads /app/results && \
+    chown -R grinn:grinn /app/logs /app/uploads /app/results
+
+# Add grinn user to docker group for Docker socket access
+RUN usermod -aG docker grinn
+
+# Switch to app user
+USER grinn
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import redis; r=redis.Redis(host='redis'); r.ping()" || exit 1
+
+# Start Celery worker
+CMD ["celery", "-A", "backend.tasks", "worker", "--loglevel=info", "--concurrency=2"]

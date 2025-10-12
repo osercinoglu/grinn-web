@@ -1,5 +1,0 @@
-# Production requirements
--r base.txt
-
-# Production monitoring and logging
-sentry-sdk>=1.32.0

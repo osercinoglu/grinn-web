@@ -20,8 +20,8 @@ except ImportError:
     Celery = None
     redis = None
 
-from .config import get_config
-from .models import Job, JobStatus
+from shared.config import get_config
+from shared.models import Job, JobStatus
 
 logger = logging.getLogger(__name__)
 config = get_config()

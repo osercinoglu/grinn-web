@@ -20,8 +20,8 @@ except ImportError:
     HAS_GCS = False
     storage = None
 
-from .config import get_config
-from .models import Job, JobFile
+from shared.config import get_config
+from shared.models import Job, JobFile
 
 logger = logging.getLogger(__name__)
 config = get_config()
@@ -419,11 +419,22 @@ class CloudStorageManager:
 # Global storage manager instance
 _storage_manager = None
 
-def get_storage_manager() -> CloudStorageManager:
-    """Get the global storage manager instance."""
+def get_storage_manager():
+    """Get the global storage manager instance (Cloud or Mock for development)."""
     global _storage_manager
     if _storage_manager is None:
-        _storage_manager = CloudStorageManager()
+        # Use mock storage in development mode
+        is_development = (os.getenv('FLASK_ENV') == 'development' or 
+                         os.getenv('DASH_ENV') == 'development' or
+                         os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true')
+        
+        if is_development:
+            from shared.mock_storage import MockStorageManager
+            _storage_manager = MockStorageManager()
+            logger.info("Using MockStorageManager for development")
+        else:
+            _storage_manager = CloudStorageManager()
+            logger.info("Using CloudStorageManager for production")
     return _storage_manager
 
 

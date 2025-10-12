@@ -1,0 +1,50 @@
+# Multi-stage Docker build for gRINN Web Application
+# This container runs both frontend and backend services
+
+FROM python:3.10-slim as base
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd --create-home --shell /bin/bash grinn
+WORKDIR /app
+RUN chown grinn:grinn /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY --chown=grinn:grinn . /app/
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/uploads /var/log/supervisor && \
+    chown -R grinn:grinn /app/logs /app/uploads /var/log/supervisor
+
+# Copy supervisor configuration
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Switch to app user
+USER grinn
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8050/api/health && curl -f http://localhost:8051/_dash-dependencies || exit 1
+
+# Expose ports
+EXPOSE 8050 8051
+
+# Start supervisor to manage both services
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
