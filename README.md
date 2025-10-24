@@ -340,7 +340,7 @@ For production deployment, configure:
 
 ---
 
-## 🔧 Development Setup
+## 🔧 Local Development Setup
 
 For local development without Docker:
 
@@ -348,9 +348,9 @@ For local development without Docker:
 
 - **Python 3.8+** with conda/miniconda
 - **PostgreSQL** (optional - SQLite used by default)
-- **Redis** (optional - in-memory broker used by default)
+- **Redis** (optional - mock storage used by default)
 
-### Setup
+### Quick Start
 
 1. **Clone and create environment:**
    ```bash
@@ -369,33 +369,129 @@ For local development without Docker:
 
 3. **Configure for development:**
    ```bash
+   # Copy environment template
    cp .env.example .env
    
-   # Edit .env to enable development mode:
-   DEVELOPMENT_MODE=true
-   DATABASE_URL=sqlite:///./dev-jobs.db
+   # Edit .env for local development
+   nano .env
    ```
 
-4. **Run services:**
+4. **Set up development configuration in .env:**
    ```bash
-   # Terminal 1: Start Celery worker (for job processing)
-   celery -A backend.tasks worker --loglevel=info
+   # Development mode (uses mock storage, SQLite)
+   DEVELOPMENT_MODE=true
+   DATABASE_URL=sqlite:////tmp/grinn_dev.db
    
-   # Terminal 2: Start web application
+   # Backend API settings
+   BACKEND_HOST=127.0.0.1
+   BACKEND_PORT=5000
+   
+   # Frontend settings
+   FRONTEND_HOST=0.0.0.0
+   FRONTEND_PORT=8051
+   
+   # Mock GCS settings (for development)
+   GCS_BUCKET_NAME=mock-bucket
+   GCS_PROJECT_ID=mock-project
+   
+   # Security
+   SECRET_KEY=development-secret-key
+   DEBUG=true
+   ```
+
+5. **Start the services:**
+   
+   **Terminal 1 - Backend API:**
+   ```bash
+   cd grinn-web
+   python backend/api.py
+   ```
+   
+   **Terminal 2 - Frontend Web Interface:**
+   ```bash
+   cd grinn-web  
    python frontend/app.py
    ```
+   
+   **Terminal 3 - Celery Worker (Optional - for job processing):**
+   ```bash
+   cd grinn-web
+   celery -A backend.tasks worker --loglevel=info
+   ```
 
-5. **Access the application:**
-   - **Main Interface:** http://localhost:8050
-   - **Job Queue:** http://localhost:8050/queue
+6. **Access the application:**
+   - **Main Interface:** http://localhost:8051
+   - **Job Queue:** http://localhost:8051/queue
+   - **Backend API:** http://localhost:5000/api/jobs
 
 ### Development Features
 
-- **Hot reloading** - Code changes reload automatically
+- **Hot reloading** - Code changes reload automatically  
 - **Mock storage** - No GCS credentials required
 - **SQLite database** - No PostgreSQL setup needed
-- **In-memory job queue** - No Redis required
-- **Debug mode** - Detailed error information
+- **Development mode** - Simplified configuration
+- **Debug logging** - Detailed error information
+- **No Docker required** - Pure Python environment
+
+### Troubleshooting
+
+**If backend fails to start:**
+```bash
+# Check environment variables
+env | grep -E "(FRONTEND_PORT|BACKEND_PORT)"
+
+# Start with explicit variables
+DEVELOPMENT_MODE=true FRONTEND_PORT=8051 BACKEND_PORT=5000 python backend/api.py
+```
+
+**If frontend can't connect to backend:**
+- Ensure backend is running on port 5000
+- Check that BACKEND_PORT=5000 in .env
+- Verify no firewall blocking localhost connections
+
+**Database issues:**
+```bash
+# Use absolute path for SQLite
+DATABASE_URL=sqlite:////tmp/grinn_dev.db
+
+# Or use in-memory database for testing
+DATABASE_URL=sqlite:///:memory:
+```
+
+### Testing Your Local Setup
+
+After starting both backend and frontend, verify everything is working:
+
+1. **Test Backend API:**
+   ```bash
+   # Should return empty array [] for fresh database
+   curl http://localhost:5000/api/jobs
+   ```
+
+2. **Test Frontend:**
+   - Open http://localhost:8051 (main interface)
+   - Click "View Job Queue" - should show empty job queue, not "Loading..."
+   - Interface should be responsive and load without errors
+
+3. **Test Job Queue Page:**
+   - Navigate to http://localhost:8051/queue
+   - Should show "No jobs found" message with proper interface
+   - Should NOT get stuck on "Loading job queue..." message
+   - Auto-refresh should work (check browser network tab)
+
+4. **Check Logs:**
+   ```bash
+   # Backend logs should show successful startup
+   # Frontend logs should show successful API connections
+   # No error messages about malformed environment variables
+   ```
+
+**Expected Behavior:**
+- ✅ Job queue loads immediately (no infinite loading)
+- ✅ Empty queue shows proper "No jobs found" message  
+- ✅ Backend API responds with JSON data
+- ✅ No environment variable parsing errors
+- ✅ Clean startup without warnings
 
 ---
 
@@ -589,6 +685,27 @@ WHERE id = 'your-job-id';"
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+## 📋 Recent Updates
+
+### v2024.10 - Job Queue & Configuration Fixes
+
+- **✅ Fixed Job Queue Loading Issue**: Resolved infinite "Loading job queue..." problem
+- **✅ Improved Environment Configuration**: Added robust error handling for malformed .env files
+- **✅ Enhanced Local Development**: Updated setup instructions with correct ports and dependencies
+- **✅ Better Error Reporting**: Config parsing now provides helpful warnings instead of crashes
+- **✅ Distributed Architecture**: Complete support for frontend/worker separation across facilities
+
+### Known Working Configuration
+
+The following local development setup is confirmed working:
+- Backend API: `http://localhost:5000`
+- Frontend Interface: `http://localhost:8051`  
+- Job Queue: `http://localhost:8051/queue`
+- SQLite database with absolute paths
+- Mock storage for development mode
 
 ---
 

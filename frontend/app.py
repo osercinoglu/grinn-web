@@ -821,80 +821,6 @@ def create_results_page(job_id: str):
         ], style={'maxWidth': '1000px', 'margin': '0 auto', 'padding': '20px'})
     ])
 
-def create_job_queue_page():
-    """Create public job queue page showing all submitted jobs."""
-    return html.Div([
-        dcc.Location(id='queue-url', refresh=False),
-        dcc.Interval(id='queue-refresh-interval', interval=10000, n_intervals=0),  # Refresh every 10 seconds
-        
-        # Header
-        html.Div([
-            html.H1([
-                html.I(className="fas fa-list-ul", style={'marginRight': '12px'}),
-                "Job Queue"
-            ], className="main-title"),
-            html.P("Public view of all submitted jobs with current status", 
-                  style={'textAlign': 'center', 'color': '#5A7A60', 'fontSize': '1.1rem'})
-        ]),
-        
-        # Privacy notice
-        html.Div([
-            html.Div([
-                html.I(className="fas fa-info-circle", style={'marginRight': '10px', 'color': '#17a2b8'}),
-                html.Strong("Privacy Notice: "),
-                "This queue shows basic job information (ID, status, timestamps). "
-                "Detailed results and files are only accessible with the specific job monitoring URL."
-            ], className="alert alert-info", style={'marginBottom': '20px'})
-        ]),
-        
-        # Controls
-        html.Div([
-            html.Div([
-                html.Button(
-                    [html.I(className="fas fa-sync", style={'marginRight': '8px'}), "Refresh Queue"],
-                    id="queue-refresh-btn",
-                    className="btn btn-primary",
-                    style={'marginRight': '10px'}
-                ),
-                html.A(
-                    [html.I(className="fas fa-arrow-left", style={'marginRight': '8px'}), "Back to Main"],
-                    href="/",
-                    className="btn btn-secondary"
-                )
-            ], style={'textAlign': 'center', 'marginBottom': '20px'})
-        ]),
-        
-        # Job queue content
-        html.Div([
-            html.Div(id="queue-content", children=[
-                html.Div([
-                    html.I(className="fas fa-hourglass-half", style={'marginRight': '8px'}),
-                    "Loading job queue..."
-                ], style={
-                    'textAlign': 'center',
-                    'color': '#8A9A8A',
-                    'padding': '40px',
-                    'fontStyle': 'italic'
-                })
-            ]),
-        ], style={'marginBottom': '20px'}),
-        
-        # Footer with instructions
-        html.Div([
-            html.Hr(),
-            html.Div([
-                html.H5("How to Monitor Your Job:", style={'color': '#5A7A60', 'marginBottom': '10px'}),
-                html.Ul([
-                    html.Li("After submitting a job, the monitoring page opens automatically in a new tab"),
-                    html.Li("Bookmark the monitoring URL to check your job status anytime"),
-                    html.Li("Only you can access detailed results and logs through your monitoring URL"),
-                    html.Li("This public queue only shows basic status information")
-                ], style={'color': '#6c757d', 'fontSize': '0.9rem'})
-            ], className="info-panel")
-        ])
-        
-    ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '20px'})
-
 # Main layout with URL routing
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
@@ -1699,7 +1625,7 @@ def handle_cancel_job(n_clicks, button_id):
     [Input('queue-refresh-interval', 'n_intervals'),
      Input('queue-refresh-btn', 'n_clicks'),
      Input('queue-status-filter', 'value')],
-    prevent_initial_call=True
+    prevent_initial_call=False
 )
 def update_job_queue(n_intervals, refresh_clicks, status_filter):
     """Update the job queue table."""

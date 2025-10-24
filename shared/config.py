@@ -8,6 +8,14 @@ from dataclasses import dataclass
 from typing import Optional
 import logging
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not available, use environment variables as-is
+    pass
+
 @dataclass
 class Config:
     """Main configuration class for gRINN Web Service."""
@@ -51,17 +59,35 @@ class Config:
         """Load configuration from environment variables."""
         # Frontend
         self.frontend_host = os.getenv("FRONTEND_HOST", self.frontend_host)
-        self.frontend_port = int(os.getenv("FRONTEND_PORT", self.frontend_port))
+        try:
+            frontend_port_str = os.getenv("FRONTEND_PORT", str(self.frontend_port))
+            self.frontend_port = int(frontend_port_str)
+        except ValueError as e:
+            logging.warning(f"Invalid FRONTEND_PORT value: {os.getenv('FRONTEND_PORT')}. Using default: {self.frontend_port}")
+        
         self.frontend_debug = os.getenv("FRONTEND_DEBUG", "false").lower() == "true"
         
         # Backend
         self.backend_host = os.getenv("BACKEND_HOST", self.backend_host)
-        self.backend_port = int(os.getenv("BACKEND_PORT", self.backend_port))
+        try:
+            backend_port_str = os.getenv("BACKEND_PORT", str(self.backend_port))
+            self.backend_port = int(backend_port_str)
+        except ValueError as e:
+            logging.warning(f"Invalid BACKEND_PORT value: {os.getenv('BACKEND_PORT')}. Using default: {self.backend_port}")
         
         # Redis/Celery
         self.redis_host = os.getenv("REDIS_HOST", self.redis_host)
-        self.redis_port = int(os.getenv("REDIS_PORT", self.redis_port))
-        self.redis_db = int(os.getenv("REDIS_DB", self.redis_db))
+        try:
+            redis_port_str = os.getenv("REDIS_PORT", str(self.redis_port))
+            self.redis_port = int(redis_port_str)
+        except ValueError as e:
+            logging.warning(f"Invalid REDIS_PORT value: {os.getenv('REDIS_PORT')}. Using default: {self.redis_port}")
+        
+        try:
+            redis_db_str = os.getenv("REDIS_DB", str(self.redis_db))
+            self.redis_db = int(redis_db_str)
+        except ValueError as e:
+            logging.warning(f"Invalid REDIS_DB value: {os.getenv('REDIS_DB')}. Using default: {self.redis_db}")
         
         if not self.celery_broker_url:
             self.celery_broker_url = f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
