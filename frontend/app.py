@@ -443,61 +443,40 @@ def create_header():
         ], style={'marginBottom': '20px'})
     ])
 
+def create_input_mode_selector():
+    """Create the input mode selection section."""
+    return html.Div([
+        html.Div([
+            html.Label("Analysis Mode:", style={'fontWeight': 'bold', 'color': '#5A7A60', 'marginRight': '15px', 'display': 'inline-block'}),
+            dbc.RadioItems(
+                id='input-mode-selector',
+                options=[
+                    {'label': ' Trajectory Analysis', 'value': 'trajectory'},
+                    {'label': ' PDB Ensemble', 'value': 'ensemble'}
+                ],
+                value='trajectory',
+                inline=True,
+                style={'display': 'inline-block'}
+            )
+        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px'})
+    ], className="panel", style={'padding': '15px', 'marginBottom': '15px'})
+
 def create_file_upload_section():
     """Create the file upload section."""
     return html.Div([
-        html.H3("Upload Files", style={'color': '#5A7A60', 'marginBottom': '15px'}),
-        
-        # Two-column layout: Requirements on left, Upload on right
+        # Mode-specific instructions and upload in single row
         html.Div([
-            # Left column - File requirements (compact)
-            html.Div([
-                # Important note about system content
-                html.Div([
-                    html.I(className="fas fa-info-circle", style={'color': '#0c5460', 'marginRight': '6px'}),
-                    html.Strong("Important: "),
-                    "Files should contain only system parts for pairwise residue interaction analysis."
-                ], className="alert alert-info", style={'fontSize': '0.9rem', 'padding': '8px 12px', 'marginBottom': '10px'}),
-                
-                # Required files (compact)
-                html.Div([
-                    html.H5("Required:", style={'color': '#5A7A60', 'marginBottom': '5px', 'fontSize': '1rem'}),
-                    html.Ul([
-                        html.Li([html.Strong("Structure"), " (.pdb/.gro)"]),
-                        html.Li([html.Strong("Trajectory"), " (.xtc/.trr) ", html.Em("max 100MB", style={'fontSize': '0.8rem'})]),
-                        html.Li([html.Strong("Topology"), " (.tpr/.top)"])
-                    ], style={'color': '#666', 'marginBottom': '10px', 'fontSize': '0.9rem', 'lineHeight': '1.3'}),
-                ]),
-                
-                # Additional files (compact)
-                html.Div([
-                    html.H5("Optional:", style={'color': '#5A7A60', 'marginBottom': '5px', 'fontSize': '1rem'}),
-                    html.Ul([
-                        html.Li("Position restraint files (.itp)"),
-                        html.Li("Topology files (.itp, .rtp)"),
-                        html.Li("Force-field folders")
-                    ], style={'color': '#666', 'marginBottom': '10px', 'fontSize': '0.9rem', 'lineHeight': '1.3'}),
-                ]),
-                
-                # Limits (compact warning)
-                html.Div([
-                    html.Div([
-                        html.Strong("Limits: "), "Other files 10MB max • Results kept 3 days only"
-                    ], style={'color': '#d32f2f', 'fontSize': '0.85rem'})
-                ], style={'backgroundColor': '#ffebee', 'padding': '6px', 'borderRadius': '3px'})
-                
-            ], style={'flex': '1', 'paddingRight': '15px'}),
+            # Left: Mode instructions
+            html.Div(id='mode-specific-instructions', style={'flex': '1', 'paddingRight': '15px'}),
             
-            # Right column - Upload zone
+            # Right: Upload zone
             html.Div([
                 html.Div([
                     html.Div([
-                        html.I(className="fas fa-cloud-upload-alt", style={'fontSize': '2rem', 'color': '#7C9885', 'marginBottom': '10px'}),
-                        html.Div("Drop files/folders here or click to browse", 
-                                style={'fontSize': '1rem', 'fontWeight': '500', 'color': '#5A7A60', 'marginBottom': '5px'}),
-                        html.Div("Supports individual files and force-field folders", 
-                                style={'fontSize': '0.8rem', 'color': '#8A9A8A'})
-                    ], className="upload-zone"),
+                        html.I(className="fas fa-cloud-upload-alt", style={'fontSize': '1.5rem', 'color': '#7C9885', 'marginBottom': '8px'}),
+                        html.Div("Drop files or click to browse", 
+                                style={'fontSize': '0.9rem', 'fontWeight': '500', 'color': '#5A7A60'})
+                    ], className="upload-zone", style={'padding': '20px', 'textAlign': 'center'}),
                     
                     dcc.Upload(
                         id='upload-files',
@@ -518,8 +497,10 @@ def create_file_upload_section():
             
         ], style={'display': 'flex', 'gap': '15px', 'marginBottom': '15px'}),
         
-        # File status and validation (compact)
-        html.Div(id="file-requirements-status", style={'marginTop': '10px'}),
+        # Hidden div for callback compatibility
+        html.Div(id="file-requirements-status", style={'display': 'none'}),
+        
+        # File list and validation messages
         html.Div(id="file-list-display", style={'display': 'none'}),
         html.Div(id="file-validation-messages")
     ], className="panel")
@@ -674,10 +655,6 @@ def create_submit_section():
         style={'display': 'none', 'marginTop': '15px'})
     ], className="panel", style={'marginBottom': '15px'})
 
-
-# create_job_monitor_section function removed - job monitoring moved to separate pages
-
-# create_job_card function removed - not used in updated interface
 
 def create_job_monitoring_page(job_id: str):
     """Create dedicated job monitoring page."""
@@ -838,10 +815,27 @@ def display_page(pathname):
         # Main page
         return html.Div([
             dcc.Store(id='uploaded-files-store', data=[]),
+            # Hidden force field selector - always present for callback consistency
+            html.Div([
+                dcc.Dropdown(
+                    id='force-field-selector',
+                    options=[
+                        {'label': 'AMBER99SB-ILDN', 'value': 'amber99sb-ildn'},
+                        {'label': 'CHARMM27', 'value': 'charmm27'},
+                        {'label': 'OPLS-AA/L', 'value': 'oplsaa'},
+                        {'label': 'GROMOS96 43a1', 'value': 'gromos43a1'},
+                        {'label': 'GROMOS96 53a6', 'value': 'gromos53a6'},
+                        {'label': 'AMBER03', 'value': 'amber03'},
+                        {'label': 'AMBER99SB', 'value': 'amber99sb'}
+                    ],
+                    value='amber99sb-ildn'
+                )
+            ], style={'display': 'none'}),
             
             create_header(),
             
             html.Div([
+                create_input_mode_selector(),
                 create_file_upload_section(),
                 create_submit_section(),
                 # Submission status area
@@ -920,6 +914,82 @@ def display_page(pathname):
 # Callbacks
 
 @app.callback(
+    [Output('mode-specific-instructions', 'children'),
+     Output('file-requirements-status', 'children')],
+    [Input('input-mode-selector', 'value')]
+)
+def update_mode_instructions(mode):
+    """Update file requirements and instructions based on selected input mode."""
+    if mode == 'ensemble':
+        # PDB conformational ensemble mode
+        instructions = html.Div([
+            html.Div([
+                html.Strong("PDB Ensemble Mode", style={'color': '#5A7A60', 'display': 'block', 'marginBottom': '8px'}),
+                html.Div([
+                    html.Strong("Required: "),
+                    "Multi-model PDB file"
+                ], style={'fontSize': '0.9rem', 'marginBottom': '8px'}),
+                
+                # Force field selector for display
+                html.Div([
+                    html.Label("Force Field:", style={'fontWeight': 'bold', 'fontSize': '0.9rem', 'marginBottom': '3px', 'display': 'block'}),
+                    dcc.Dropdown(
+                        id='force-field-display',
+                        options=[
+                            {'label': 'AMBER99SB-ILDN', 'value': 'amber99sb-ildn'},
+                            {'label': 'CHARMM27', 'value': 'charmm27'},
+                            {'label': 'OPLS-AA/L', 'value': 'oplsaa'},
+                            {'label': 'GROMOS96 43a1', 'value': 'gromos43a1'},
+                            {'label': 'GROMOS96 53a6', 'value': 'gromos53a6'},
+                            {'label': 'AMBER03', 'value': 'amber03'},
+                            {'label': 'AMBER99SB', 'value': 'amber99sb'}
+                        ],
+                        value='amber99sb-ildn',
+                        placeholder="Select force field...",
+                        style={'fontSize': '0.9rem'}
+                    )
+                ], style={'marginTop': '8px'}),
+                
+                html.Div([
+                    html.I(className="fas fa-info-circle", style={'marginRight': '5px'}),
+                    "Topology auto-generated"
+                ], style={'fontSize': '0.8rem', 'color': '#666', 'marginTop': '8px'})
+            ])
+        ], style={'padding': '12px', 'backgroundColor': '#f8f9fa', 'borderRadius': '5px', 'border': '1px solid #dee2e6'})
+        
+    else:  # trajectory mode (default)
+        instructions = html.Div([
+            html.Div([
+                html.Strong("Trajectory Mode", style={'color': '#5A7A60', 'display': 'block', 'marginBottom': '8px'}),
+                html.Div([
+                    html.Strong("Required: "),
+                    html.Ul([
+                        html.Li("Structure (.pdb/.gro)", style={'margin': '2px 0'}),
+                        html.Li("Trajectory (.xtc/.trr, max 100MB)", style={'margin': '2px 0'}),
+                        html.Li("Topology (.tpr/.top)", style={'margin': '2px 0'})
+                    ], style={'fontSize': '0.85rem', 'marginTop': '5px', 'marginBottom': '5px', 'paddingLeft': '20px'})
+                ], style={'fontSize': '0.9rem', 'marginBottom': '5px'}),
+                
+                html.Div([
+                    html.Strong("Optional: "),
+                    "Restraint files (.itp), topology includes"
+                ], style={'fontSize': '0.85rem', 'color': '#666'})
+            ])
+        ], style={'padding': '12px', 'backgroundColor': '#f8f9fa', 'borderRadius': '5px', 'border': '1px solid #dee2e6'})
+    
+    return [instructions, html.Div()]  # Return as list
+
+# Sync display force field selector with hidden one
+@app.callback(
+    Output('force-field-selector', 'value'),
+    [Input('force-field-display', 'value')],
+    prevent_initial_call=True
+)
+def sync_force_field_selector(display_value):
+    """Sync the hidden force field selector with the display one."""
+    return display_value if display_value is not None else 'amber99sb-ildn'
+
+@app.callback(
     [Output('file-list-display', 'children'),
      Output('file-list-display', 'style'),
      Output('file-validation-messages', 'children'),
@@ -927,16 +997,17 @@ def display_page(pathname):
      Output('submit-job-btn', 'disabled'),
      Output('submit-status-message', 'children'),
      Output('submit-status-message', 'style')],
-    [Input('upload-files', 'contents')],
+    [Input('upload-files', 'contents'),
+     Input('input-mode-selector', 'value')],
     [State('upload-files', 'filename'),
      State('uploaded-files-store', 'data')]
 )
-def handle_file_upload(contents, filenames, stored_files):
+def handle_file_upload(contents, input_mode, filenames, stored_files):
     """Handle file upload and validation."""
     if not contents:
         return [], {'display': 'none'}, [], stored_files, True, [
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
-            "Upload required files (structure, trajectory, topology) to enable analysis"
+            "Upload required files to enable analysis"
         ], {
             'color': '#8A9A8A', 
             'fontSize': '0.9rem',
@@ -1013,50 +1084,74 @@ def handle_file_upload(contents, filenames, stored_files):
                 html.Div([
                     html.Button(
                         html.I(className="fas fa-trash"),
-                        id={'type': 'remove-file', 'filename': file_data['filename']},
+                        id={'type': 'remove-file', 'index': files.index(file_data)},
                         className="btn btn-danger",
-                        style={'fontSize': '0.8rem', 'padding': '4px 8px'}
+                        style={'fontSize': '0.8rem', 'padding': '4px 8px'},
+                        title=f"Remove {file_data['filename']}"
                     )
                 ], className="file-actions")
             ], className="file-item")
         )
     
-    # Check for required files for trajectory analysis
-    has_structure = any(f['file_type'] in ['gro', 'pdb'] for f in files)
-    has_trajectory = any(f['file_type'] == 'xtc' for f in files) 
-    has_topology = any(f['file_type'] in ['tpr', 'top'] for f in files)
-    
-    required_files_met = has_structure and has_trajectory and has_topology
-    submit_disabled = not required_files_met
-    
-    # Add file requirements status message
-    if files:
-        requirements_status = []
-        requirements_status.append(html.Li([
-            html.I(className="fas fa-check" if has_structure else "fas fa-times", 
-                   style={'color': 'green' if has_structure else 'red', 'marginRight': '8px'}),
-            "Structure file (GRO/PDB)"
-        ]))
-        requirements_status.append(html.Li([
-            html.I(className="fas fa-check" if has_trajectory else "fas fa-times",
-                   style={'color': 'green' if has_trajectory else 'red', 'marginRight': '8px'}),
-            "Trajectory file (XTC)"
-        ]))
-        requirements_status.append(html.Li([
-            html.I(className="fas fa-check" if has_topology else "fas fa-times",
-                   style={'color': 'green' if has_topology else 'red', 'marginRight': '8px'}),
-            "Topology file (TPR/TOP)"
-        ]))
+    # Validation based on input mode
+    if input_mode == 'ensemble':
+        # For ensemble mode, only need a multi-model PDB file
+        has_pdb = any(f['file_type'] == 'pdb' for f in files)
+        required_files_met = has_pdb
         
-        validation_messages.append(
-            html.Div([
-                html.H6("File Requirements:", style={'marginBottom': '10px'}),
-                html.Ul(requirements_status, style={'marginBottom': '10px'}),
-                html.P("All three file types are required to proceed with trajectory analysis.",
-                       style={'color': '#666', 'fontSize': '0.9rem', 'marginBottom': '0'})
-            ], className="alert alert-info" if required_files_met else "alert alert-warning")
-        )
+        # Add file requirements status message
+        if files:
+            requirements_status = []
+            requirements_status.append(html.Li([
+                html.I(className="fas fa-check" if has_pdb else "fas fa-times", 
+                       style={'color': 'green' if has_pdb else 'red', 'marginRight': '8px'}),
+                "Multi-model PDB file"
+            ]))
+            
+            validation_messages.append(
+                html.Div([
+                    html.H6("File Requirements:", style={'marginBottom': '10px'}),
+                    html.Ul(requirements_status, style={'marginBottom': '10px'}),
+                    html.P("Multi-model PDB file is required for ensemble analysis. Topology will be generated automatically.",
+                           style={'color': '#666', 'fontSize': '0.9rem', 'marginBottom': '0'})
+                ], className="alert alert-info" if required_files_met else "alert alert-warning")
+            )
+    else:
+        # For trajectory mode, need structure, trajectory, and topology
+        has_structure = any(f['file_type'] in ['gro', 'pdb'] for f in files)
+        has_trajectory = any(f['file_type'] in ['xtc', 'trr'] for f in files) 
+        has_topology = any(f['file_type'] in ['tpr', 'top'] for f in files)
+        required_files_met = has_structure and has_trajectory and has_topology
+        
+        # Add file requirements status message
+        if files:
+            requirements_status = []
+            requirements_status.append(html.Li([
+                html.I(className="fas fa-check" if has_structure else "fas fa-times", 
+                       style={'color': 'green' if has_structure else 'red', 'marginRight': '8px'}),
+                "Structure file (GRO/PDB)"
+            ]))
+            requirements_status.append(html.Li([
+                html.I(className="fas fa-check" if has_trajectory else "fas fa-times",
+                       style={'color': 'green' if has_trajectory else 'red', 'marginRight': '8px'}),
+                "Trajectory file (XTC/TRR)"
+            ]))
+            requirements_status.append(html.Li([
+                html.I(className="fas fa-check" if has_topology else "fas fa-times",
+                       style={'color': 'green' if has_topology else 'red', 'marginRight': '8px'}),
+                "Topology file (TPR/TOP)"
+            ]))
+            
+            validation_messages.append(
+                html.Div([
+                    html.H6("File Requirements:", style={'marginBottom': '10px'}),
+                    html.Ul(requirements_status, style={'marginBottom': '10px'}),
+                    html.P("All three file types are required to proceed with trajectory analysis.",
+                           style={'color': '#666', 'fontSize': '0.9rem', 'marginBottom': '0'})
+                ], className="alert alert-info" if required_files_met else "alert alert-warning")
+            )
     
+    submit_disabled = not required_files_met
     style = {'display': 'block'} if files else {'display': 'none'}
     
     # Create submit status message
@@ -1140,15 +1235,157 @@ def toggle_parameters(n_clicks, current_style):
             html.Small("(optional - click to customize)", style={'color': '#8A9A8A'})
         ]
 
+# Separate callback to update display when files are removed
+@app.callback(
+    [Output('file-list-display', 'children', allow_duplicate=True),
+     Output('file-list-display', 'style', allow_duplicate=True),
+     Output('file-validation-messages', 'children', allow_duplicate=True),
+     Output('submit-job-btn', 'disabled', allow_duplicate=True),
+     Output('submit-status-message', 'children', allow_duplicate=True),
+     Output('submit-status-message', 'style', allow_duplicate=True)],
+    [Input('uploaded-files-store', 'data')],
+    [State('input-mode-selector', 'value')],
+    prevent_initial_call=True
+)
+def update_file_display_on_removal(stored_files, input_mode):
+    """Update file display when files are removed from store."""
+    if not stored_files:
+        # No files - hide display and disable submit
+        return [], {'display': 'none'}, [], True, [
+            html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
+            "Upload required files to enable analysis"
+        ], {
+            'color': '#8A9A8A', 
+            'fontStyle': 'italic',
+            'textAlign': 'center'
+        }
+    
+    # Use the same logic as the main file upload handler
+    files = stored_files
+    input_mode = input_mode or 'trajectory'
+    
+    # Create file list display (same logic as in handle_file_upload)
+    file_list_items = []
+    for file_data in files:
+        size_mb = file_data['size_bytes'] / (1024 * 1024)
+        file_list_items.append(
+            html.Div([
+                html.Div([
+                    html.I(className="fas fa-file file-icon"),
+                    html.Span(file_data['filename'], className="file-name"),
+                    html.Span(f" ({size_mb:.1f} MB)", className="file-size")
+                ], className="file-info"),
+                html.Div([
+                    html.Button(
+                        html.I(className="fas fa-trash"),
+                        id={'type': 'remove-file', 'index': files.index(file_data)},
+                        className="btn btn-danger",
+                        style={'fontSize': '0.8rem', 'padding': '4px 8px'},
+                        title=f"Remove {file_data['filename']}"
+                    )
+                ], className="file-actions")
+            ], className="file-item")
+        )
+    
+    # Validation based on input mode
+    validation_messages = []
+    if input_mode == 'ensemble':
+        # For ensemble mode, only need a multi-model PDB file
+        has_pdb = any(f['file_type'] == 'pdb' for f in files)
+        required_files_met = has_pdb
+        
+        if files:
+            if has_pdb:
+                validation_messages.append(
+                    html.Div([
+                        html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
+                        "Ready for ensemble analysis"
+                    ], className="alert alert-success")
+                )
+            else:
+                validation_messages.append(
+                    html.Div([
+                        html.I(className="fas fa-exclamation-triangle", style={'color': 'orange', 'marginRight': '8px'}),
+                        "Need a PDB file with multiple models for ensemble analysis"
+                    ], className="alert alert-warning")
+                )
+    else:
+        # Trajectory mode requirements
+        has_structure = any(f['file_type'] in ['pdb', 'gro'] for f in files)
+        has_topology = any(f['file_type'] in ['tpr', 'top'] for f in files)
+        has_trajectory = any(f['file_type'] in ['xtc', 'trr'] for f in files)
+        required_files_met = has_structure and has_topology and has_trajectory
+        
+        if files:
+            missing = []
+            if not has_structure:
+                missing.append("structure file (PDB/GRO)")
+            if not has_topology:
+                missing.append("topology file (TPR/TOP)")
+            if not has_trajectory:
+                missing.append("trajectory file (XTC/TRR)")
+            
+            if missing:
+                validation_messages.append(
+                    html.Div([
+                        html.I(className="fas fa-exclamation-triangle", style={'color': 'orange', 'marginRight': '8px'}),
+                        f"Missing: {', '.join(missing)}"
+                    ], className="alert alert-warning")
+                )
+            else:
+                validation_messages.append(
+                    html.Div([
+                        html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
+                        "All required files uploaded"
+                    ], className="alert alert-success")
+                )
+    
+    # Submit button state and status
+    submit_disabled = not required_files_met
+    if required_files_met:
+        status_message = [
+            html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
+            "Ready to submit job"
+        ]
+        status_style = {
+            'color': 'green', 
+            'fontWeight': 'bold',
+            'textAlign': 'center'
+        }
+    else:
+        status_message = [
+            html.I(className="fas fa-upload", style={'marginRight': '8px'}),
+            "Upload required files to enable analysis"
+        ]
+        status_style = {
+            'color': '#8A9A8A', 
+            'fontStyle': 'italic',
+            'textAlign': 'center'
+        }
+    
+    return file_list_items, {'display': 'block'}, validation_messages, submit_disabled, status_message, status_style
+
+# Clear upload component when files are removed to allow re-uploading the same file
+@app.callback(
+    Output('upload-files', 'contents', allow_duplicate=True),
+    [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks')],
+    prevent_initial_call=True
+)
+def clear_upload_on_removal(n_clicks):
+    """Clear the upload component when files are removed to allow re-uploading same files."""
+    if any(n_clicks):
+        return None
+    return no_update
+
 @app.callback(
     Output('uploaded-files-store', 'data', allow_duplicate=True),
-    [Input({'type': 'remove-file', 'filename': dash.dependencies.ALL}, 'n_clicks')],
+    [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks')],
     [State('uploaded-files-store', 'data')],
     prevent_initial_call=True
 )
 def remove_file(n_clicks, stored_files):
     """Remove a file from the upload list."""
-    if not any(n_clicks):
+    if not any(n_clicks) or not stored_files:
         return stored_files
     
     # Find which button was clicked
@@ -1156,32 +1393,31 @@ def remove_file(n_clicks, stored_files):
     if not ctx.triggered:
         return stored_files
     
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    button_data = json.loads(button_id)
-    filename_to_remove = button_data['filename']
+    # For pattern-matching callbacks, the prop_id contains the full component ID
+    triggered_id = ctx.triggered[0]['prop_id']
     
-    # Filter out the removed file
-    updated_files = [f for f in stored_files if f['filename'] != filename_to_remove]
-    
-    return updated_files
-
-def submit_job_to_backend(job_data):
-    """Submit job to backend API."""
     try:
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs"
-        response = requests.post(backend_url, json=job_data, timeout=30)
+        # Extract the JSON part from the prop_id (before the '.n_clicks')
+        button_id_str = triggered_id.split('.')[0]
+        button_data = json.loads(button_id_str)
+        index_to_remove = button_data['index']
         
-        if response.status_code == 201:
-            return response.json()
+        # Validate index
+        if 0 <= index_to_remove < len(stored_files):
+            filename_to_remove = stored_files[index_to_remove]['filename']
+            # Remove the file at the specified index
+            updated_files = [f for i, f in enumerate(stored_files) if i != index_to_remove]
+            logger.info(f"Removed file: {filename_to_remove}, Remaining files: {len(updated_files)}")
+            return updated_files
         else:
-            logger.error(f"Backend job submission failed: {response.status_code} - {response.text}")
-            return {'error': f'Backend error: {response.status_code}'}
+            logger.warning(f"Invalid index to remove: {index_to_remove}, file list length: {len(stored_files)}")
+            return stored_files
             
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to connect to backend: {e}")
-        return {'error': f'Connection error: {str(e)}'}
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+        logger.error(f"Error parsing button ID: {triggered_id}, Error: {e}")
+        return stored_files
 
-# fetch_jobs_from_backend function removed - job fetching now done directly in callbacks
+# Note: Old submit_job_to_backend function removed - now using signed URL workflow for direct GCS uploads
 
 # Add div to show submission status
 @app.callback(
@@ -1193,51 +1429,175 @@ def submit_job_to_backend(job_data):
      State('source-sel', 'value'),
      State('target-sel', 'value'),
      State('privacy-setting', 'value'),
+     State('input-mode-selector', 'value'),
+     State('force-field-selector', 'value'),
      State('uploaded-files-store', 'data')],
     prevent_initial_call=True
 )
 def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff, 
-                         source_sel, target_sel, privacy_setting, uploaded_files):
-    """Handle job submission."""
+                         source_sel, target_sel, privacy_setting, input_mode, 
+                         force_field, uploaded_files):
+    """Handle job submission with direct GCS upload using signed URLs."""
+    logger.info(f"Job submission callback triggered: submit_clicks={submit_clicks}, files={len(uploaded_files) if uploaded_files else 0}")
+    
     if not submit_clicks:
+        logger.info("No submit clicks, returning no_update")
         return no_update, no_update
         
     if not uploaded_files:
+        logger.warning("No uploaded files for job submission")
         return html.Div("Please upload files to submit a job.", className="alert alert-danger"), no_update
     
     try:
         # Generate job name automatically based on timestamp and files
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         structure_file = next((f['filename'] for f in uploaded_files if f['file_type'] in ['gro', 'pdb']), 'structure')
-        job_name = f"gRINN_analysis_{structure_file.split('.')[0]}_{timestamp}"
+        mode_prefix = "ensemble" if input_mode == 'ensemble' else "trajectory"
+        job_name = f"gRINN_{mode_prefix}_{structure_file.split('.')[0]}_{timestamp}"
         
-        # Prepare job data for backend API
+        # Step 1: Request signed URLs from backend
+        files_info = []
+        for file_data in uploaded_files:
+            files_info.append({
+                'filename': file_data['filename'],
+                'file_type': file_data.get('file_type', 'unknown'),
+                'content_type': 'application/octet-stream',  # Generic binary
+                'size': file_data.get('size_bytes', 0)
+            })
+        
         is_private = 'private' in (privacy_setting or [])
-        job_submission_data = {
-            'job_name': job_name,
-            'description': "Trajectory analysis using gRINN",
-            'user_email': None,
-            'is_private': is_private,
-            'parameters': {
-                'skip_frames': skip_frames or 1,
-                'initpairfilter_cutoff': initpairfilter_cutoff or 12.0,
-                'source_sel': source_sel or None,
-                'target_sel': target_sel or None
+        
+        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/generate-upload-urls"
+        logger.info(f"Requesting signed URLs from {backend_url}")
+        
+        response = requests.post(
+            backend_url,
+            json={
+                'files': files_info,
+                'input_mode': input_mode or 'trajectory',
+                'force_field': force_field if input_mode == 'ensemble' else None,
+                'parameters': {
+                    'skip_frames': skip_frames or 1,
+                    'initpairfilter_cutoff': initpairfilter_cutoff or 12.0,
+                    'source_sel': source_sel or None,
+                    'target_sel': target_sel or None
+                },
+                'is_private': is_private,
+                'job_name': job_name,
+                'description': f"{'Ensemble' if input_mode == 'ensemble' else 'Trajectory'} analysis using gRINN"
             },
-            'uploaded_files': uploaded_files
-        }
+            timeout=30
+        )
         
-        # Submit to backend API
-        result = submit_job_to_backend(job_submission_data)
-        
-        if 'error' in result:
+        if response.status_code != 200:
+            error_msg = response.json().get('error', 'Unknown error')
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                f"Job submission failed: {result['error']}"
+                f"Failed to initiate upload: {error_msg}"
             ], className="alert alert-danger"), no_update
         
-        job_id = result.get('job_id')
-        logger.info(f"Job submitted successfully: {job_id}")
+        result = response.json()
+        job_id = result['job_id']
+        upload_urls = result['upload_urls']
+        
+        logger.info(f"Received {len(upload_urls)} signed URLs for job {job_id}")
+        
+        # Step 2: Upload files directly to GCS using signed URLs (or handle mock storage)
+        uploaded_successfully = []
+        
+        for url_info in upload_urls:
+            # Find the corresponding file data
+            file_data = next((f for f in uploaded_files if f['filename'] == url_info['filename']), None)
+            if not file_data:
+                logger.error(f"Could not find file data for {url_info['filename']}")
+                continue
+            
+            # Decode base64 content
+            # Note: content is already the base64 string (without the data URI prefix)
+            # since it was stored that way in handle_file_upload
+            try:
+                content = base64.b64decode(file_data['content'])
+            except Exception as e:
+                logger.error(f"Failed to decode file {url_info['filename']}: {e}")
+                continue
+            
+            upload_url = url_info['upload_url']
+            
+            # Check if using mock storage (local development)
+            if upload_url.startswith('mock://'):
+                logger.info(f"Mock storage detected - writing {url_info['filename']} to local file ({len(content)} bytes)")
+                try:
+                    # Write directly to the file path provided by mock storage
+                    os.makedirs(os.path.dirname(url_info['file_path']), exist_ok=True)
+                    with open(url_info['file_path'], 'wb') as f:
+                        f.write(content)
+                    
+                    uploaded_successfully.append({
+                        'file_type': url_info['file_type'],
+                        'filename': url_info['filename'],
+                        'file_path': url_info['file_path']
+                    })
+                    logger.info(f"Successfully wrote {url_info['filename']} to {url_info['file_path']}")
+                except Exception as e:
+                    error_msg = f"Mock storage write error for {url_info['filename']}: {str(e)}"
+                    logger.error(error_msg)
+                    return html.Div([
+                        html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                        error_msg
+                    ], className="alert alert-danger"), no_update
+            else:
+                # Upload directly to GCS using signed URL
+                logger.info(f"Uploading {url_info['filename']} directly to GCS ({len(content)} bytes)")
+                
+                try:
+                    upload_response = requests.put(
+                        upload_url,
+                        data=content,
+                        headers={'Content-Type': 'application/octet-stream'},
+                        timeout=300  # 5 minutes for large files
+                    )
+                    
+                    if upload_response.status_code in [200, 201]:
+                        uploaded_successfully.append({
+                            'file_type': url_info['file_type'],
+                            'filename': url_info['filename'],
+                            'file_path': url_info['file_path']
+                        })
+                        logger.info(f"Successfully uploaded {url_info['filename']}")
+                    else:
+                        error_msg = f"Upload failed for {url_info['filename']}: HTTP {upload_response.status_code}"
+                        logger.error(error_msg)
+                        return html.Div([
+                            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                            error_msg
+                        ], className="alert alert-danger"), no_update
+                        
+                except Exception as e:
+                    error_msg = f"Upload error for {url_info['filename']}: {str(e)}"
+                    logger.error(error_msg)
+                return html.Div([
+                    html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                    error_msg
+                ], className="alert alert-danger"), no_update
+        
+        # Step 3: Confirm uploads and start processing
+        logger.info(f"Confirming {len(uploaded_successfully)} uploads for job {job_id}")
+        
+        confirm_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/confirm-uploads"
+        confirm_response = requests.post(
+            confirm_url,
+            json={'uploaded_files': uploaded_successfully},
+            timeout=30
+        )
+        
+        if confirm_response.status_code != 200:
+            error_msg = confirm_response.json().get('error', 'Failed to start processing')
+            return html.Div([
+                html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                f"Files uploaded but processing failed: {error_msg}"
+            ], className="alert alert-danger"), no_update
+        
+        logger.info(f"Job {job_id} submitted successfully")
         
         # Show success message and auto-open monitoring page
         success_message = html.Div([
@@ -1249,6 +1609,8 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             html.Div([
                 html.P(f"Job ID: {job_id}"),
                 html.P(f"Job Name: {job_name}"),
+                html.P(f"Analysis Mode: {input_mode or 'trajectory'}"),
+                html.P(f"Files uploaded: {len(uploaded_successfully)}"),
                 html.P("Monitoring page will open in a new tab automatically."),
             ], className="info-card"),
             
@@ -1324,8 +1686,8 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
                     
                     html.Div([
                         html.H5("Status", style={'margin': '0 0 10px 0'}),
-                        html.Span(job.status.value.title(), 
-                                className=f"job-status status-{job.status.value}",
+                        html.Span(job.status.value.title() if isinstance(job.status, JobStatus) else job.status.title(), 
+                                className=f"job-status status-{job.status.value if isinstance(job.status, JobStatus) else job.status}",
                                 style={'fontSize': '1.1rem', 'padding': '8px 16px'}),
                         html.P(job.current_step or "No current step", 
                               style={'margin': '10px 0 0 0', 'color': '#5A7A60'})
@@ -1360,8 +1722,8 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
                         html.Li([
                             html.I(className="fas fa-file", style={'marginRight': '8px', 'color': '#5A7A60'}),
                             f"{file_info.filename} ({file_info.file_type.value.upper()}, {file_info.size_bytes/1024/1024:.1f} MB)"
-                        ]) for file_info in job.files
-                    ] if job.files else [html.Li("No files information available")])
+                        ]) for file_info in job.input_files
+                    ] if job.input_files else [html.Li("No files information available")])
                 ], className="panel", style={'marginTop': '20px'})
             ])
         ])
@@ -1419,9 +1781,10 @@ def update_results_page(job_id):
         job = Job.from_dict(job_data)
         
         if job.status != JobStatus.COMPLETED:
+            status_display = job.status.value.title() if isinstance(job.status, JobStatus) else job.status.title()
             return html.Div([
                 html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
-                f"Job is not completed yet. Current status: {job.status.value.title()}"
+                f"Job is not completed yet. Current status: {status_display}"
             ], className="alert alert-info")
         
         if not job.results_gcs_path:

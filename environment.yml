@@ -1,0 +1,10 @@
+name: grinn-web
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - redis-server  # Redis server for task queue
+  - pip
+  - pip:
+    - -r requirements.txt

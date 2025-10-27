@@ -414,10 +414,142 @@ class CloudStorageManager:
         except Exception as e:
             logger.error(f"Bucket access check failed: {e}")
             return False
+    
+    def generate_signed_upload_url(self, job_id: str, filename: str, 
+                                   content_type: str = "application/octet-stream",
+                                   expiration_minutes: int = 60) -> Dict[str, str]:
+        """
+        Generate a signed URL for direct file upload to GCS.
+        
+        Args:
+            job_id: Unique job identifier
+            filename: Name of the file to be uploaded
+            content_type: MIME type of the file
+            expiration_minutes: How long the URL should be valid (default: 60 minutes)
+            
+        Returns:
+            Dictionary with 'upload_url', 'file_path', and 'expires_at'
+        """
+        try:
+            # Create GCS object path
+            gcs_path = f"{self._get_input_prefix(job_id)}{filename}"
+            
+            # Get blob reference
+            blob = self.bucket.blob(gcs_path)
+            
+            # Generate signed URL for PUT operation
+            signed_url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(minutes=expiration_minutes),
+                method="PUT",
+                content_type=content_type,
+                # Add custom metadata headers
+                headers={
+                    'x-goog-meta-job-id': job_id,
+                    'x-goog-meta-original-filename': filename,
+                    'x-goog-meta-upload-timestamp': datetime.utcnow().isoformat()
+                }
+            )
+            
+            expires_at = datetime.utcnow() + timedelta(minutes=expiration_minutes)
+            
+            logger.info(f"Generated signed upload URL for {filename} (job {job_id}), expires at {expires_at}")
+            
+            return {
+                'upload_url': signed_url,
+                'file_path': gcs_path,
+                'expires_at': expires_at.isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to generate signed URL for {filename} (job {job_id}): {e}")
+            raise
+    
+    def generate_multiple_signed_upload_urls(self, job_id: str, 
+                                            files_info: List[Dict[str, str]],
+                                            expiration_minutes: int = 60) -> List[Dict[str, str]]:
+        """
+        Generate signed URLs for multiple files.
+        
+        Args:
+            job_id: Unique job identifier
+            files_info: List of dicts with 'filename', 'content_type', and 'file_type'
+            expiration_minutes: How long the URLs should be valid
+            
+        Returns:
+            List of dictionaries with upload information for each file
+        """
+        try:
+            upload_urls = []
+            
+            for file_info in files_info:
+                url_data = self.generate_signed_upload_url(
+                    job_id=job_id,
+                    filename=file_info['filename'],
+                    content_type=file_info.get('content_type', 'application/octet-stream'),
+                    expiration_minutes=expiration_minutes
+                )
+                
+                url_data['file_type'] = file_info.get('file_type', 'unknown')
+                url_data['filename'] = file_info['filename']
+                upload_urls.append(url_data)
+            
+            logger.info(f"Generated {len(upload_urls)} signed upload URLs for job {job_id}")
+            return upload_urls
+            
+        except Exception as e:
+            logger.error(f"Failed to generate multiple signed URLs for job {job_id}: {e}")
+            raise
+    
+    def verify_file_uploaded(self, gcs_path: str) -> bool:
+        """
+        Verify that a file was successfully uploaded to GCS.
+        
+        Args:
+            gcs_path: GCS path to check
+            
+        Returns:
+            True if file exists
+        """
+        try:
+            blob = self.bucket.blob(gcs_path)
+            return blob.exists()
+        except Exception as e:
+            logger.error(f"Failed to verify file at {gcs_path}: {e}")
+            return False
 
 
 # Global storage manager instance
 _storage_manager = None
+
+def validate_storage_manager_interface(storage_manager):
+    """
+    Validate that storage manager has all required methods with correct signatures.
+    This helps catch interface mismatches early in development.
+    """
+    required_methods = [
+        'generate_multiple_signed_upload_urls',
+        'verify_file_uploaded',
+        'download_job_inputs',
+        'upload_job_results',
+        'download_job_results',
+        'delete_job_files',
+        'list_job_files',
+        'generate_signed_url',
+        'check_bucket_access'
+    ]
+    
+    missing_methods = []
+    for method_name in required_methods:
+        if not hasattr(storage_manager, method_name):
+            missing_methods.append(method_name)
+        elif not callable(getattr(storage_manager, method_name)):
+            missing_methods.append(f"{method_name} (not callable)")
+    
+    if missing_methods:
+        raise AttributeError(f"Storage manager missing required methods: {missing_methods}")
+    
+    logger.info("Storage manager interface validation passed")
 
 def get_storage_manager():
     """Get the global storage manager instance (Cloud or Mock for development)."""
@@ -435,22 +567,12 @@ def get_storage_manager():
         else:
             _storage_manager = CloudStorageManager()
             logger.info("Using CloudStorageManager for production")
+            
+        # Validate interface compatibility
+        try:
+            validate_storage_manager_interface(_storage_manager)
+        except AttributeError as e:
+            logger.error(f"Storage manager interface validation failed: {e}")
+            raise
+            
     return _storage_manager
-
-
-# Utility functions for easy access
-def upload_job_files(job: Job, uploaded_files: List[Dict[str, Any]]) -> bool:
-    """Upload files for a job using the global storage manager."""
-    return get_storage_manager().upload_job_files(job, uploaded_files)
-
-def download_job_inputs(job_id: str, local_dir: str) -> Dict[str, str]:
-    """Download job input files using the global storage manager."""
-    return get_storage_manager().download_job_inputs(job_id, local_dir)
-
-def upload_job_results(job_id: str, results_dir: str) -> str:
-    """Upload job results using the global storage manager."""
-    return get_storage_manager().upload_job_results(job_id, results_dir)
-
-def download_job_results(job_id: str, local_dir: str) -> Dict[str, str]:
-    """Download job results using the global storage manager."""
-    return get_storage_manager().download_job_results(job_id, local_dir)

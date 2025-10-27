@@ -4,7 +4,9 @@ A comprehensive and interactive web interface for the gRINN (get Residue iNterac
 
 ## ✨ Key Features
 
-- 🚀 **Easy Job Submission** - Upload trajectory files and configure analysis parameters
+- � **Dual Input Modes** - Support for MD trajectories and PDB conformational ensembles
+- �🚀 **Easy Job Submission** - Upload files and configure analysis parameters
+- 🧬 **Automatic Topology Generation** - Force field-based topology for ensemble mode
 - 📊 **Real-time Monitoring** - Track job progress with dedicated monitoring pages  
 - 🔒 **Privacy Controls** - Option to hide job details from public queue
 - 💾 **Persistent Storage** - Jobs and results saved with full history
@@ -15,7 +17,8 @@ A comprehensive and interactive web interface for the gRINN (get Residue iNterac
 ## Overview
 
 This service provides a complete web-based solution for:
-- Uploading molecular dynamics trajectory files (PDB/GRO structure + XTC trajectory)
+- Uploading molecular dynamics trajectory files OR multi-model PDB ensembles
+- Automatic topology generation for PDB ensembles with force field selection
 - Configuring gRINN analysis parameters
 - **Persistent job storage** with PostgreSQL database
 - **Real-time job monitoring** with bookmark-able URLs
@@ -347,8 +350,9 @@ For local development without Docker:
 ### Prerequisites
 
 - **Python 3.8+** with conda/miniconda
-- **PostgreSQL** (optional - SQLite used by default)
-- **Redis** (optional - mock storage used by default)
+- **Redis** (required for Celery task queue)
+- **PostgreSQL** (optional - SQLite used by default in development)
+- **Docker** (optional - for running Redis easily)
 
 ### Quick Start
 
@@ -357,17 +361,18 @@ For local development without Docker:
    git clone https://github.com/osercinoglu/grinn-web.git
    cd grinn-web
    
-   # Create conda environment
+   # Option A: Create environment from environment.yml (includes Redis server)
+   conda env create -f environment.yml
+   conda activate grinn-web
+   
+   # Option B: Manual setup
    conda create -n grinn-web python=3.10
    conda activate grinn-web
-   ```
-
-2. **Install dependencies:**
-   ```bash
    pip install -r requirements.txt
+   conda install -c conda-forge redis-server
    ```
 
-3. **Configure for development:**
+2. **Configure for development:**
    ```bash
    # Copy environment template
    cp .env.example .env
@@ -376,7 +381,7 @@ For local development without Docker:
    nano .env
    ```
 
-4. **Set up development configuration in .env:**
+3. **Set up development configuration in .env:**
    ```bash
    # Development mode (uses mock storage, SQLite)
    DEVELOPMENT_MODE=true
@@ -399,21 +404,31 @@ For local development without Docker:
    DEBUG=true
    ```
 
-5. **Start the services:**
+4. **Start the services:**
    
-   **Terminal 1 - Backend API:**
+   **Terminal 1 - Redis (Required for Celery):**
+   ```bash
+   # Start Redis server (installed via conda or system package)
+   redis-server --daemonize yes
+   
+   # Verify Redis is running
+   redis-cli ping
+   # Should return: PONG
+   ```
+   
+   **Terminal 2 - Backend API:**
    ```bash
    cd grinn-web
    python backend/api.py
    ```
    
-   **Terminal 2 - Frontend Web Interface:**
+   **Terminal 3 - Frontend Web Interface:**
    ```bash
    cd grinn-web  
    python frontend/app.py
    ```
    
-   **Terminal 3 - Celery Worker (Optional - for job processing):**
+   **Terminal 4 - Celery Worker (Optional - for job processing):**
    ```bash
    cd grinn-web
    celery -A backend.tasks worker --loglevel=info
@@ -497,18 +512,57 @@ After starting both backend and frontend, verify everything is working:
 
 ## 🚀 Usage Guide
 
+### Input Modes
+
+The gRINN web service supports two analysis modes:
+
+#### 1. Trajectory Analysis Mode (Default)
+Analyze molecular dynamics trajectory files with pre-computed topology.
+
+**Required Files:**
+- Structure file (PDB or GRO format)
+- Trajectory file (XTC or TRR format, max 100MB)
+- Topology file (TPR or TOP format)
+
+**Optional Files:**
+- Position restraint files (.itp)
+- Topology includes (.itp, .rtp)
+- Force field folders
+
+#### 2. PDB Conformational Ensemble Mode
+Analyze multiple conformations from a single multi-model PDB file with automatic topology generation.
+
+**Required:**
+- Multi-model PDB file (containing multiple MODEL entries)
+- Force field selection from dropdown:
+  - AMBER99SB-ILDN (default)
+  - CHARMM27
+  - OPLS-AA/L
+  - GROMOS96 43a1
+  - GROMOS96 53a6
+  - AMBER03
+  - AMBER99SB
+
+**Note:** Topology is generated automatically using the selected force field.
+
 ### Job Submission
 
-1. **Upload Files:**
-   - Structure file (PDB/GRO format)
-   - Trajectory file (XTC format)
+1. **Select Input Mode:**
+   - Choose between "Trajectory Analysis" or "PDB Conformational Ensemble"
 
-2. **Configure Parameters:**
+2. **Upload Files:**
+   - **Trajectory mode:** Structure, trajectory, and topology files
+   - **Ensemble mode:** Multi-model PDB file only
+
+3. **Configure Force Field (Ensemble mode only):**
+   - Select appropriate force field for your system
+
+4. **Configure Parameters:**
    - Residue selection (default: all)
    - Analysis type
    - Privacy settings
 
-3. **Submit and Monitor:**
+5. **Submit and Monitor:**
    - Job redirects to monitoring page
    - Bookmark the URL for later access
    - Real-time progress updates
@@ -689,6 +743,15 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 ## 📋 Recent Updates
+
+### v2024.10 - Dual Input Mode Support
+
+- **✨ NEW: PDB Conformational Ensemble Mode**: Analyze multi-model PDB files with automatic topology generation
+- **✨ Force Field Selection**: Choose from 7 popular force fields (AMBER, CHARMM, OPLS, GROMOS)
+- **✨ Dual Input Modes**: Seamlessly switch between trajectory and ensemble analysis
+- **✨ Dynamic UI**: File requirements update automatically based on selected mode
+- **✅ Enhanced Validation**: Mode-specific file validation for both trajectory and ensemble inputs
+- **✅ Updated Job Submission**: Includes input mode and force field parameters in backend API
 
 ### v2024.10 - Job Queue & Configuration Fixes
 

@@ -17,7 +17,7 @@ project_root = os.path.dirname(os.path.dirname(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from shared.database import DatabaseManager
+from shared.database import DatabaseManager, JobModel
 from shared.models import JobStatus
 from shared.storage import get_storage_manager
 
@@ -73,46 +73,162 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
         local_db_manager.update_job_status(job_id, JobStatus.RUNNING, "Processing gRINN analysis", 25)
         
         # Create temporary directory for job processing
-        with tempfile.TemporaryDirectory() as temp_dir:
+        # For mock storage (local dev), use storage location directly to avoid /tmp issue with Docker in WSL2
+        # For cloud storage, download to temp directory
+        use_temp_dir = not hasattr(local_storage_manager, 'base_dir')
+        
+        if use_temp_dir:
+            temp_dir = tempfile.mkdtemp()
             input_dir = os.path.join(temp_dir, 'input')
             output_dir = os.path.join(temp_dir, 'output')
             os.makedirs(input_dir, exist_ok=True)
             os.makedirs(output_dir, exist_ok=True)
-            
-            # Download input files from storage
+        else:
+            # Mock storage - use storage location directly (accessible to Docker)
+            base_storage_dir = local_storage_manager.base_dir
+            input_dir = os.path.join(base_storage_dir, job_id, 'input')
+            output_dir = os.path.join(base_storage_dir, job_id, 'output')
+            os.makedirs(output_dir, exist_ok=True)
+        
+        try:
+            # Download input files from storage (for cloud) or verify they exist (for mock)
             logger.info(f"Downloading input files for job {job_id}")
-            structure_path = os.path.join(input_dir, 'structure.pdb')
-            trajectory_path = os.path.join(input_dir, 'trajectory.xtc')
             
-            local_storage_manager.download_file(
-                f"jobs/{job_id}/structure.pdb", 
-                structure_path
-            )
-            local_storage_manager.download_file(
-                f"jobs/{job_id}/trajectory.xtc", 
-                trajectory_path
-            )
+            # Get job details to determine input mode and files
+            job = local_db_manager.get_job(job_id)
+            input_mode = job_params.get('input_mode', 'trajectory')
+            
+            # Download all input files for the job
+            if use_temp_dir:
+                file_paths = local_storage_manager.download_job_inputs(job_id, input_dir)
+            else:
+                # For mock storage, files are already in place
+                file_paths = {}
+                if os.path.exists(input_dir):
+                    for filename in os.listdir(input_dir):
+                        file_path = os.path.join(input_dir, filename)
+                        if os.path.isfile(file_path):
+                            file_paths[filename] = file_path
+                logger.info(f"Using {len(file_paths)} input files from mock storage at {input_dir}")
+            
+            # Analyze downloaded files to determine structure, topology, and trajectory
+            input_files = job.input_files or []
+            structure_file = None
+            topology_file = None
+            trajectory_file = None
+            
+            for file_info in input_files:
+                filename = file_info['filename']
+                file_type = file_info['file_type']
+                
+                logger.info(f"Found {filename} ({file_type})")
+                
+                # Track file paths by type
+                if file_type in ['pdb', 'gro']:
+                    structure_file = filename
+                elif file_type == 'top':
+                    topology_file = filename
+                elif file_type in ['xtc', 'trr']:
+                    trajectory_file = filename
+            
+            if not structure_file:
+                raise ValueError(f"No structure file found for job {job_id}")
             
             # Run gRINN analysis in Docker container
-            logger.info(f"Running gRINN analysis for job {job_id}")
+            logger.info(f"Running gRINN analysis for job {job_id} in {input_mode} mode")
             docker_client = docker.from_env()
             
             grinn_image = os.getenv('GRINN_DOCKER_IMAGE', 'grinn:latest')
             
-            # Prepare Docker command
+            # Build Docker command following grinn_workflow.py argument structure
+            # The Docker entrypoint expects 'workflow' as the first argument,
+            # then it internally calls: conda run -n grinn-env python -u grinn_workflow.py [args]
+            # Positional arguments: structure_file out_folder
             docker_command = [
-                'python', '/app/grinn_workflow.py',
-                '--structure', '/input/structure.pdb',
-                '--trajectory', '/input/trajectory.xtc',
-                '--output', '/output',
-                '--format', 'json'
+                'workflow',                   # Docker entrypoint mode
+                f'/input/{structure_file}',  # structure_file (positional)
+                '/output'                     # out_folder (positional)
             ]
             
-            # Add job-specific parameters
-            if job_params.get('threshold'):
-                docker_command.extend(['--threshold', str(job_params['threshold'])])
-            if job_params.get('frames'):
-                docker_command.extend(['--frames', str(job_params['frames'])])
+            # Input mode specific arguments
+            if input_mode == 'ensemble':
+                # Ensemble mode: multi-model PDB, topology will be generated
+                docker_command.append('--ensemble_mode')
+                
+                # Force field for topology recreation (if specified)
+                force_field = job_params.get('force_field', 'amber99sb-ildn')
+                docker_command.extend(['--force_field', force_field])
+                
+                # Optional water model
+                water_model = job_params.get('water_model', 'tip3p')
+                docker_command.extend(['--water_model', water_model])
+                
+            else:
+                # Trajectory mode: requires topology and trajectory files
+                if not topology_file:
+                    raise ValueError(f"Topology file required for trajectory mode")
+                if not trajectory_file:
+                    raise ValueError(f"Trajectory file required for trajectory mode")
+                
+                docker_command.extend(['--top', f'/input/{topology_file}'])
+                docker_command.extend(['--traj', f'/input/{trajectory_file}'])
+            
+            # Common optional parameters
+            
+            # Initial pair filter cutoff (default: 10.0)
+            if job_params.get('initpairfilter_cutoff'):
+                docker_command.extend(['--initpairfiltercutoff', str(job_params['initpairfilter_cutoff'])])
+            
+            # Skip frames in trajectory (default: 1 = no skipping)
+            if job_params.get('skip_frames') and job_params['skip_frames'] > 1:
+                docker_command.extend(['--skip', str(job_params['skip_frames'])])
+            
+            # Source and target selection for residue filtering
+            if job_params.get('source_sel'):
+                # source_sel is a list of residue IDs/names
+                source_sel = job_params['source_sel']
+                if isinstance(source_sel, str):
+                    source_sel = source_sel.split()
+                docker_command.extend(['--source_sel'] + source_sel)
+            
+            if job_params.get('target_sel'):
+                # target_sel is a list of residue IDs/names
+                target_sel = job_params['target_sel']
+                if isinstance(target_sel, str):
+                    target_sel = target_sel.split()
+                docker_command.extend(['--target_sel'] + target_sel)
+            
+            # Number of threads (default: 1)
+            if job_params.get('nt'):
+                docker_command.extend(['--nt', str(job_params['nt'])])
+            
+            # GPU acceleration flag
+            if job_params.get('use_gpu'):
+                docker_command.append('--gpu')
+            
+            # PDB fixer flag (default: fix PDB)
+            if job_params.get('skip_pdb_fix'):
+                docker_command.append('--nofixpdb')
+            
+            # PEN (Protein Energy Network) creation
+            if job_params.get('create_pen'):
+                docker_command.append('--create_pen')
+                
+                # PEN cutoffs (list of energy cutoff values)
+                if job_params.get('pen_cutoffs'):
+                    cutoffs = job_params['pen_cutoffs']
+                    if isinstance(cutoffs, (list, tuple)):
+                        docker_command.extend(['--pen_cutoffs'] + [str(c) for c in cutoffs])
+                
+                # Include covalent bonds in PEN
+                if job_params.get('pen_include_covalents') is not None:
+                    include_cov = job_params['pen_include_covalents']
+                    if isinstance(include_cov, (list, tuple)):
+                        docker_command.extend(['--pen_include_covalents'] + [str(ic).lower() for ic in include_cov])
+            
+            logger.info(f"Docker command: {' '.join(docker_command)}")
+            logger.info(f"Mounting host directory {input_dir} to container /input")
+            logger.info(f"Files in {input_dir}: {os.listdir(input_dir) if os.path.exists(input_dir) else 'directory does not exist'}")
             
             # Run container
             container = docker_client.containers.run(
@@ -132,19 +248,25 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             
             # Upload results to storage
             logger.info(f"Uploading results for job {job_id}")
-            result_files = []
             
+            # Upload entire results directory to GCS
+            results_gcs_prefix = local_storage_manager.upload_job_results(job_id, output_dir)
+            
+            # Get list of uploaded result files for job metadata
+            result_files = []
             for root, dirs, files in os.walk(output_dir):
                 for file in files:
                     local_path = os.path.join(root, file)
                     relative_path = os.path.relpath(local_path, output_dir)
-                    storage_path = f"jobs/{job_id}/results/{relative_path}"
-                    
-                    local_storage_manager.upload_file(local_path, storage_path)
+                    storage_path = f"{results_gcs_prefix}{relative_path}"
                     result_files.append(storage_path)
+            
+            # TODO: Add optional cleanup of input files to save storage costs
+            # For now, keeping input files for debugging and reprocessing capabilities
             
             # Update job status to completed
             local_db_manager.update_job_status(job_id, JobStatus.COMPLETED, "Job completed successfully", 100)
+
             
             logger.info(f"Job {job_id} completed successfully")
             return {
@@ -153,6 +275,25 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                 'message': 'Job completed successfully'
             }
             
+        except Exception as e:
+            logger.error(f"Job {job_id} failed: {str(e)}")
+            
+            # Update job status to failed
+            local_db_manager.update_job_status(
+                job_id,
+                JobStatus.FAILED,
+                current_step="Job failed",
+                error_message=str(e)
+            )
+            
+            raise
+        
+        finally:
+            # Cleanup temp directory if we created one
+            if use_temp_dir and os.path.exists(temp_dir):
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+    
     except Exception as e:
         logger.error(f"Job {job_id} failed: {str(e)}")
         
@@ -176,27 +317,9 @@ def cleanup_old_jobs():
     try:
         logger.info("Starting job cleanup")
         
-        with local_db_manager.get_session() as session:
-            old_jobs = local_db_manager.get_old_jobs(session)
-            
-            for job in old_jobs:
-                try:
-                    # Delete files from storage
-                    if job.results_gcs_path:
-                        local_storage_manager.delete_folder(job.results_gcs_path)
-                    
-                    # Delete input files
-                    local_storage_manager.delete_file(f"jobs/{job.id}/structure.pdb")
-                    local_storage_manager.delete_file(f"jobs/{job.id}/trajectory.xtc")
-                    
-                    # Delete job from database
-                    local_db_manager.delete_job(session, job.id)
-                    logger.info(f"Cleaned up job {job.id}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to cleanup job {job.id}: {str(e)}")
-            
-            session.commit()
+        # Get old jobs (older than 7 days) and clean them up
+        deleted_count = local_db_manager.cleanup_old_jobs(days_old=7)
+        logger.info(f"Cleaned up {deleted_count} old jobs")
             
     except Exception as e:
         logger.error(f"Job cleanup failed: {str(e)}")

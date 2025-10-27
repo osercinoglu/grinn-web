@@ -184,7 +184,20 @@ class DatabaseManager:
     def get_job(self, job_id: str) -> Optional[JobModel]:
         """Get job by ID."""
         with self.get_session() as session:
-            return session.query(JobModel).filter(JobModel.id == job_id).first()
+            job = session.query(JobModel).filter(JobModel.id == job_id).first()
+            if job:
+                # Force load all attributes before expunging to avoid lazy load issues
+                # Access all attributes to trigger loading
+                _ = job.id, job.status, job.parameters, job.input_files
+                _ = job.job_name, job.description, job.created_at, job.started_at
+                _ = job.completed_at, job.progress_percentage, job.current_step
+                _ = job.error_message, job.results_gcs_path, job.user_email
+                _ = job.worker_id, job.worker_host, job.is_private
+                _ = job.processing_time_seconds, job.memory_usage_mb, job.cpu_usage_percent
+                
+                # Expunge the object from session to avoid detached session issues
+                session.expunge(job)
+            return job
     
     def update_job_status(self, job_id: str, status: JobStatus, current_step: str = None,
                          progress_percentage: int = None, error_message: str = None) -> bool:

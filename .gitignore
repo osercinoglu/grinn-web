@@ -33,6 +33,7 @@ venv.bak/
 # Database
 *.db
 *.sqlite3
+dump.rdb
 
 # Logs
 *.log
