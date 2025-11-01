@@ -36,6 +36,9 @@ except ImportError:
     logger = logging.getLogger(__name__)
     logger.warning("Could not import process_grinn_job - task submission will fail")
 
+# Import dashboard manager
+from backend.dashboard_manager import DashboardManager
+
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -50,11 +53,12 @@ CORS(app)  # Enable CORS for frontend communication
 # Global managers
 storage_manager = None
 database_manager = None
+dashboard_manager = None
 _managers_initialized = False
 
 def initialize_managers():
     """Initialize storage and database managers."""
-    global storage_manager, database_manager, _managers_initialized
+    global storage_manager, database_manager, dashboard_manager, _managers_initialized
     
     if _managers_initialized:
         return True
@@ -65,6 +69,12 @@ def initialize_managers():
         
         # Initialize database if needed
         database_manager.init_db()
+        
+        # Initialize dashboard manager with public host from config
+        dashboard_manager = DashboardManager(
+            storage_manager,
+            public_host=config.dashboard_public_host
+        )
         
         _managers_initialized = True
         logger.info("Managers initialized successfully")
@@ -205,7 +215,7 @@ def cancel_job(job_id: str):
 
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
-    """Get all jobs with optional status filtering."""
+    """Get all jobs with optional status filtering. Private jobs are excluded from public queue."""
     try:
         ensure_managers_initialized()
         status_filter = request.args.get('status')
@@ -214,6 +224,9 @@ def get_jobs():
         
         with database_manager.get_session() as session:
             query = session.query(JobModel)
+            
+            # Filter out private jobs from public queue
+            query = query.filter(JobModel.is_private == False)
             
             # Apply status filter if provided
             if status_filter and status_filter != 'all':
@@ -228,18 +241,7 @@ def get_jobs():
             jobs = query.all()
             
             # Convert to dict format
-            jobs_data = []
-            for job in jobs:
-                job_dict = job.to_dict()
-                
-                # If job is private, mask sensitive information in public view
-                if job.is_private:
-                    job_dict['job_name'] = "Private Job"
-                    job_dict['description'] = "Private job details are hidden"
-                    job_dict['user_email'] = None
-                    # Keep status, timestamps, and progress for monitoring
-                
-                jobs_data.append(job_dict)
+            jobs_data = [job.to_dict() for job in jobs]
         
         return jsonify({
             'success': True,
@@ -288,13 +290,13 @@ def generate_upload_urls():
         force_field = data.get('force_field')
         parameters = data.get('parameters', {})
         is_private = data.get('is_private', False)
-        job_name = data.get('job_name', f'gRINN_{input_mode}_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}')
+        job_name = data.get('job_name')  # Optional user-provided name
         
         # Create job in database with status 'pending_upload'
         mode_desc = 'Ensemble' if input_mode == 'ensemble' else 'Trajectory'
         with database_manager.get_session() as session:
             job_model = JobModel(
-                job_name=job_name,
+                job_name=job_name,  # Can be None
                 description=data.get('description', f'{mode_desc} analysis using gRINN'),
                 user_email=data.get('user_email'),
                 is_private=is_private,
@@ -534,6 +536,255 @@ if not _managers_initialized:
     except Exception as e:
         logger.warning(f"Failed to initialize managers on import: {e}")
         # Managers will be initialized on first request via ensure_managers_initialized()
+
+
+# ============================================================================
+# Dashboard Management Endpoints
+# ============================================================================
+
+@app.route('/api/jobs/<job_id>/dashboard/start', methods=['POST'])
+def start_dashboard(job_id):
+    """
+    Start a dashboard container for a job.
+    
+    Returns:
+        JSON with dashboard URL and port
+    """
+    ensure_managers_initialized()
+    
+    try:
+        # Verify job exists
+        job = database_manager.get_job(job_id)
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        
+        # Start dashboard
+        result = dashboard_manager.start_dashboard(job_id)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error starting dashboard for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jobs/<job_id>/dashboard/stop', methods=['POST'])
+def stop_dashboard(job_id):
+    """
+    Stop a dashboard container for a job.
+    
+    Returns:
+        JSON with success status
+    """
+    ensure_managers_initialized()
+    
+    try:
+        result = dashboard_manager.stop_dashboard(job_id)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error stopping dashboard for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jobs/<job_id>/dashboard/status', methods=['GET'])
+def dashboard_status(job_id):
+    """
+    Get dashboard status for a job.
+    
+    Returns:
+        JSON with dashboard running status and info
+    """
+    ensure_managers_initialized()
+    
+    try:
+        status = dashboard_manager.get_dashboard_status(job_id)
+        return jsonify(status), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting dashboard status for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jobs/<job_id>/dashboard/logs', methods=['GET'])
+def dashboard_logs(job_id):
+    """
+    Get dashboard container logs for a job.
+    
+    Query Parameters:
+        since: Optional timestamp to get logs since
+    
+    Returns:
+        JSON with container logs
+    """
+    ensure_managers_initialized()
+    
+    try:
+        since_timestamp = request.args.get('since')
+        logs = dashboard_manager.get_dashboard_logs(job_id, since_timestamp)
+        return jsonify(logs), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting dashboard logs for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dashboards', methods=['GET'])
+def list_dashboards():
+    """
+    List all active dashboard instances.
+    
+    Returns:
+        JSON with list of active dashboards
+    """
+    ensure_managers_initialized()
+    
+    try:
+        active = dashboard_manager.list_active_dashboards()
+        return jsonify({'dashboards': active}), 200
+        
+    except Exception as e:
+        logger.error(f"Error listing dashboards: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jobs/<job_id>/logs', methods=['GET'])
+def get_job_logs(job_id):
+    """
+    Get container logs for a running or completed job.
+    Attempts to fetch logs from the gRINN processing container.
+    
+    Query Parameters:
+        tail: Number of lines to return from end (default: 100, max: 1000)
+        since: Unix timestamp to get logs since
+    
+    Returns:
+        JSON with container logs
+    """
+    ensure_managers_initialized()
+    
+    try:
+        import docker
+        
+        # Get tail parameter (default 100, max 1000)
+        tail = request.args.get('tail', '100')
+        try:
+            tail = min(int(tail), 1000)
+        except ValueError:
+            tail = 100
+        
+        # Get since parameter
+        since_timestamp = request.args.get('since')
+        
+        # Try to get logs from Docker container
+        # Container name pattern: grinn-{job_id}
+        docker_client = docker.from_env()
+        
+        logs_text = ""
+        container_found = False
+        container_status = "unknown"
+        
+        # Primary container name pattern (as created in tasks.py)
+        container_name = f"grinn-{job_id}"
+        
+        try:
+            # Try to get container (works for both running and stopped)
+            container = docker_client.containers.get(container_name)
+            container_found = True
+            container_status = container.status
+            
+            # Get logs from the container
+            log_kwargs = {'stdout': True, 'stderr': True, 'timestamps': True}
+            
+            # If container is still running, get all logs for real-time updates
+            # If stopped, use tail to limit output
+            if container.status == 'running':
+                log_kwargs['tail'] = 'all'  # Get all logs for running containers
+                logger.info(f"Fetching ALL logs from RUNNING container {container_name}")
+            else:
+                log_kwargs['tail'] = tail
+                logger.info(f"Fetching last {tail} lines from {container.status} container {container_name}")
+            
+            if since_timestamp:
+                log_kwargs['since'] = int(since_timestamp)
+            
+            try:
+                logs_bytes = container.logs(**log_kwargs)
+                logs_text = logs_bytes.decode('utf-8', errors='replace')
+                
+                if logs_text.strip():
+                    logger.info(f"Successfully retrieved {len(logs_text)} characters of logs from container {container_name} (status: {container.status})")
+                else:
+                    logs_text = f"Container {container_name} is {container.status}, but no logs available yet.\nThis is normal if the container just started."
+                    logger.info(f"Container {container_name} has no logs yet (status: {container.status})")
+                    
+            except Exception as e:
+                logger.error(f"Error reading logs from container {container_name}: {e}")
+                logs_text = f"Container {container_name} found ({container.status}), but could not read logs: {str(e)}"
+                
+        except docker.errors.NotFound:
+            # Container not found - might be removed or not started yet
+            logger.info(f"Container {container_name} not found")
+            
+            # Try to find any container with job_id in the name
+            try:
+                all_containers = docker_client.containers.list(
+                    all=True, 
+                    filters={'name': job_id}
+                )
+                
+                if all_containers:
+                    # Found a container with job_id in name
+                    container = all_containers[0]
+                    container_found = True
+                    container_status = container.status
+                    
+                    log_kwargs = {'tail': tail, 'stdout': True, 'stderr': True}
+                    if since_timestamp:
+                        log_kwargs['since'] = int(since_timestamp)
+                    
+                    logs_bytes = container.logs(**log_kwargs)
+                    logs_text = logs_bytes.decode('utf-8', errors='replace')
+                    logger.info(f"Found alternative container: {container.name}")
+            except Exception as e:
+                logger.warning(f"Error searching for alternative containers: {e}")
+        
+        except Exception as e:
+            logger.error(f"Error accessing container {container_name}: {e}")
+            logs_text = f"Error accessing container: {str(e)}"
+        
+        # If still no logs, check job status for error messages or current step
+        if not logs_text or logs_text.strip() == "":
+            job = database_manager.get_job(job_id)
+            if job and job.error_message:
+                logs_text = f"=== Job Error ===\n{job.error_message}\n\n=== Container Status ===\nContainer not found or no logs available."
+            elif job and job.current_step:
+                logs_text = f"=== Current Status ===\n{job.current_step}\n\n=== Container Logs ===\nWaiting for container logs...\n\nNote: Logs will appear once the container starts processing.\nIf the job is queued, please wait for it to start."
+            else:
+                logs_text = "No logs available yet.\n\nPossible reasons:\n- Job is queued and hasn't started\n- Container is starting up\n- Container has been removed after completion"
+        
+        return jsonify({
+            'success': True,
+            'logs': logs_text,
+            'container_found': container_found,
+            'container_status': container_status
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting logs for job {job_id}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'logs': f"Error retrieving logs: {str(e)}"
+        }), 500
+
 
 if __name__ == '__main__':
     # Initialize managers

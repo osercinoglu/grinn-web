@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 
 import dash
-from dash import Dash, dcc, html, dash_table, Input, Output, State, callback_context, no_update
+from dash import Dash, dcc, html, dash_table, Input, Output, State, callback_context, no_update, ALL
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.graph_objects as go
@@ -116,50 +116,50 @@ app.index_string = '''
             }
             
             .job-status {
-                padding: 8px 16px;
-                border-radius: 25px;
-                font-weight: 600;
-                text-transform: uppercase;
-                font-size: 0.8rem;
-                border: 2px solid transparent;
+                padding: 6px 12px;
+                border-radius: 5px;
+                font-weight: 500;
+                font-size: 0.9rem;
+                border: 1px solid;
                 display: inline-block;
+                cursor: default;
+                user-select: none;
             }
             
             .status-pending { 
-                background: linear-gradient(135deg, #ffeaa7, #fdcb6e);
-                color: #2d3436;
-                border-color: #fdcb6e;
+                background-color: rgba(253, 203, 110, 0.1);
+                color: #d68910;
+                border-color: rgba(253, 203, 110, 0.3);
             }
             .status-queued { 
-                background: linear-gradient(135deg, #74b9ff, #0984e3);
-                color: white;
-                border-color: #0984e3;
+                background-color: rgba(9, 132, 227, 0.1);
+                color: #0984e3;
+                border-color: rgba(9, 132, 227, 0.3);
             }
             .status-uploading { 
-                background: linear-gradient(135deg, #fd79a8, #e84393);
-                color: white;
-                border-color: #e84393;
+                background-color: rgba(232, 67, 147, 0.1);
+                color: #d63384;
+                border-color: rgba(232, 67, 147, 0.3);
             }
             .status-running { 
-                background: linear-gradient(135deg, #55a3ff, #2d74da);
-                color: white;
-                border-color: #2d74da;
-                animation: pulse 2s infinite;
+                background-color: rgba(45, 116, 218, 0.1);
+                color: #2d74da;
+                border-color: rgba(45, 116, 218, 0.3);
             }
             .status-completed { 
-                background: linear-gradient(135deg, #00b894, #00a085);
-                color: white;
-                border-color: #00a085;
+                background-color: rgba(0, 168, 133, 0.1);
+                color: #00a085;
+                border-color: rgba(0, 168, 133, 0.3);
             }
             .status-failed { 
-                background: linear-gradient(135deg, #e17055, #d63031);
-                color: white;
-                border-color: #d63031;
+                background-color: rgba(214, 48, 49, 0.1);
+                color: #d63031;
+                border-color: rgba(214, 48, 49, 0.3);
             }
             .status-cancelled { 
-                background: linear-gradient(135deg, #636e72, #2d3436);
-                color: white;
-                border-color: #2d3436;
+                background-color: rgba(108, 117, 125, 0.1);
+                color: #6c757d;
+                border-color: rgba(108, 117, 125, 0.3);
             }
             
             @keyframes pulse {
@@ -243,6 +243,10 @@ app.index_string = '''
             .file-item:hover {
                 background: rgba(248,253,248,1);
                 border-color: #7C9885;
+            }
+            
+            .file-table-row:hover {
+                background-color: #f8f9fa !important;
             }
             
             .alert {
@@ -405,7 +409,7 @@ def create_header():
             }
         ),
         
-        # Navigation bar
+        # Navigation bar - horizontal layout (row)
         html.Div([
             html.Div([
                 html.A(
@@ -413,6 +417,7 @@ def create_header():
                     href="/",
                     className="nav-link",
                     style={
+                        'display': 'inline-block',
                         'padding': '8px 16px',
                         'backgroundColor': 'rgba(90, 122, 96, 0.1)',
                         'color': '#5A7A60',
@@ -420,7 +425,8 @@ def create_header():
                         'borderRadius': '5px',
                         'marginRight': '10px',
                         'fontSize': '0.9rem',
-                        'fontWeight': '500'
+                        'fontWeight': '500',
+                        'textAlign': 'center'
                     }
                 ),
                 html.A(
@@ -429,6 +435,7 @@ def create_header():
                     target="_blank",
                     className="nav-link",
                     style={
+                        'display': 'inline-block',
                         'padding': '8px 16px',
                         'backgroundColor': 'rgba(23, 162, 184, 0.1)',
                         'color': '#17a2b8',
@@ -436,7 +443,8 @@ def create_header():
                         'borderRadius': '5px',
                         'fontSize': '0.9rem',
                         'fontWeight': '500',
-                        'border': '1px solid rgba(23, 162, 184, 0.3)'
+                        'border': '1px solid rgba(23, 162, 184, 0.3)',
+                        'textAlign': 'center'
                     }
                 )
             ], style={'textAlign': 'center'})
@@ -475,7 +483,9 @@ def create_file_upload_section():
                     html.Div([
                         html.I(className="fas fa-cloud-upload-alt", style={'fontSize': '1.5rem', 'color': '#7C9885', 'marginBottom': '8px'}),
                         html.Div("Drop files or click to browse", 
-                                style={'fontSize': '0.9rem', 'fontWeight': '500', 'color': '#5A7A60'})
+                                style={'fontSize': '0.9rem', 'fontWeight': '500', 'color': '#5A7A60'}),
+                        html.Div("Tip: For force field folders, upload all files individually or as a ZIP", 
+                                style={'fontSize': '0.75rem', 'color': '#8A9A8A', 'marginTop': '4px', 'fontStyle': 'italic'})
                     ], className="upload-zone", style={'padding': '20px', 'textAlign': 'center'}),
                     
                     dcc.Upload(
@@ -637,15 +647,18 @@ def create_submit_section():
                             options=[{
                                 'label': html.Span([
                                     html.I(className="fas fa-lock", style={'marginRight': '8px', 'color': '#5A7A60'}),
-                                    "Keep job details private in public queue"
+                                    "Keep job details private"
                                 ], style={'fontSize': '0.9rem'}),
                                 'value': 'private'
                             }],
                             value=[],
                             className="form-check"
                         ),
-                        html.Small("Private jobs appear as 'Private Job' in the public job queue", 
-                                  style={'color': '#8A9A8A', 'fontSize': '0.8rem', 'marginTop': '5px'})
+                        html.Div([
+                            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '5px', 'color': '#FFA500', 'fontSize': '0.8rem'}),
+                            html.Small("Private jobs will NOT appear in the public job queue. Bookmark the monitoring page to access results later!", 
+                                      style={'color': '#8A9A8A', 'fontSize': '0.8rem'})
+                        ], style={'marginTop': '5px', 'display': 'flex', 'alignItems': 'flex-start'})
                     ], className="form-group")
                 ], style={'flex': '1', 'paddingLeft': '15px'})
             ], style={'display': 'flex', 'gap': '15px'})
@@ -662,24 +675,18 @@ def create_job_monitoring_page(job_id: str):
     return html.Div([
         dcc.Location(id='monitor-url', refresh=False),
         dcc.Store(id='monitor-job-id', data=job_id),
+        dcc.Store(id='monitor-dashboard-url-store'),  # Store for dashboard URL to open in new tab
         dcc.Interval(id='monitor-refresh-interval', interval=3000, n_intervals=0),  # Refresh every 3 seconds
         
-        # Header
-        html.Div([
-            html.H1([
-                html.I(className="fas fa-eye", style={'marginRight': '12px'}),
-                "Job Monitor"
-            ], className="main-title"),
-            html.P(f"Real-time monitoring for job: {job_id}", 
-                  style={'textAlign': 'center', 'color': '#5A7A60', 'fontSize': '1.1rem'})
-        ]),
+        # Header with navigation
+        create_header(),
         
         # Bookmark reminder
         html.Div([
-            html.I(className="fas fa-bookmark", style={'marginRight': '10px', 'fontSize': '1.2rem'}),
+            html.I(className="fas fa-bookmark", style={'marginRight': '10px', 'fontSize': '0.9rem'}),
             html.Strong("Bookmark this page! "),
             "Save this URL to check your job status anytime: ",
-            html.Code(current_url, style={'backgroundColor': 'rgba(255,255,255,0.3)', 'padding': '2px 6px', 'borderRadius': '4px'})
+            html.Code(current_url, style={'backgroundColor': 'rgba(255,255,255,0.3)', 'padding': '2px 6px', 'borderRadius': '4px', 'fontSize': '0.9rem'})
         ], className="bookmark-reminder"),
         
         # Job details section
@@ -692,15 +699,61 @@ def create_job_monitoring_page(job_id: str):
                 html.A(
                     [html.I(className="fas fa-arrow-left", style={'marginRight': '8px'}), "Back to Main"],
                     href="/",
-                    className="btn btn-secondary",
-                    style={'marginRight': '10px'}
+                    style={
+                        'marginRight': '10px',
+                        'fontSize': '0.9rem',
+                        'padding': '8px 16px',
+                        'display': 'inline-block',
+                        'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                        'color': '#6c757d',
+                        'textDecoration': 'none',
+                        'border': '1px solid rgba(108, 117, 125, 0.3)',
+                        'borderRadius': '5px',
+                        'fontWeight': '500'
+                    }
                 ),
                 html.Button(
                     [html.I(className="fas fa-sync", style={'marginRight': '8px'}), "Refresh Now"],
                     id="manual-refresh-btn",
-                    className="btn btn-primary"
+                    style={
+                        'fontSize': '0.9rem',
+                        'padding': '8px 16px',
+                        'backgroundColor': 'rgba(90, 122, 96, 0.1)',
+                        'color': '#5A7A60',
+                        'border': '1px solid rgba(90, 122, 96, 0.3)',
+                        'borderRadius': '5px',
+                        'fontWeight': '500',
+                        'cursor': 'pointer'
+                    }
                 )
-            ], style={'textAlign': 'center', 'marginTop': '20px'})
+            ], style={'textAlign': 'center', 'marginTop': '20px'}),
+            
+            # Dashboard modal (same as queue page)
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.Div([
+                            html.H5("Dashboard Ready", className="modal-title"),
+                            html.Button("×", id='close-monitor-dashboard-modal', className="close", 
+                                      style={'fontSize': '1.5rem', 'border': 'none', 'background': 'none'})
+                        ], className="modal-header"),
+                        html.Div([
+                            html.P(id='monitor-dashboard-modal-message', children="Dashboard is starting..."),
+                            html.Div([
+                                html.A("Open Dashboard", 
+                                      id='monitor-dashboard-link',
+                                      href="",
+                                      target="_blank",
+                                      className="btn btn-success",
+                                      style={'display': 'none'})
+                            ], style={'textAlign': 'center', 'marginTop': '20px'})
+                        ], className="modal-body"),
+                        html.Div([
+                            html.Button("Close", id='close-monitor-dashboard-modal-btn', className="btn btn-secondary")
+                        ], className="modal-footer")
+                    ], className="modal-content")
+                ], className="modal-dialog")
+            ], id='monitor-dashboard-modal', className="modal", style={'display': 'none'})
         ], style={'maxWidth': '1000px', 'margin': '0 auto', 'padding': '20px'})
     ])
 
@@ -708,23 +761,28 @@ def create_job_queue_page():
     """Create job queue page showing all submitted jobs."""
     return html.Div([
         dcc.Location(id='queue-url', refresh=False),
+        dcc.Store(id='dashboard-url-store'),  # Store for dashboard URL to open in new tab
         
-        # Header
-        html.Div([
-            html.H1([
-                html.I(className="fas fa-list", style={'marginRight': '12px'}),
-                "Job Queue"
-            ], className="main-title"),
-            html.P("View all submitted jobs and their current status", 
-                  style={'textAlign': 'center', 'color': '#5A7A60', 'fontSize': '1.1rem'})
-        ]),
+        # Header with navigation
+        create_header(),
         
         # Queue controls
         html.Div([
-            # Filter controls
+            # Filter controls with flexbox layout
             html.Div([
+                # Search box
                 html.Div([
-                    html.Label("Status Filter:", style={'marginBottom': '5px', 'fontWeight': 'bold'}),
+                    html.Label("Search by Job ID:", style={'marginBottom': '5px', 'fontWeight': 'bold', 'fontSize': '0.9rem', 'display': 'block'}),
+                    dcc.Input(
+                        id='queue-search-input',
+                        type='text',
+                        placeholder='e.g., 6-sad-squid-snuggle-softly',
+                        style={'width': '100%', 'padding': '8px', 'borderRadius': '4px', 'border': '1px solid #ccc', 'fontSize': '0.9rem'}
+                    )
+                ], style={'minWidth': '280px', 'flex': '0 0 auto'}),
+                
+                html.Div([
+                    html.Label("Status Filter:", style={'marginBottom': '5px', 'fontWeight': 'bold', 'fontSize': '0.9rem', 'display': 'block'}),
                     dcc.Dropdown(
                         id='queue-status-filter',
                         options=[
@@ -737,23 +795,68 @@ def create_job_queue_page():
                             {'label': 'Cancelled', 'value': 'cancelled'}
                         ],
                         value='all',
-                        style={'width': '200px'}
+                        style={'fontSize': '0.9rem'}
                     )
-                ], style={'display': 'inline-block', 'marginRight': '20px'}),
+                ], style={'minWidth': '200px', 'flex': '0 0 auto'}),
                 
-                html.Button(
-                    [html.I(className="fas fa-sync", style={'marginRight': '8px'}), "Refresh Queue"],
-                    id="queue-refresh-btn",
-                    className="btn btn-primary",
-                    style={'verticalAlign': 'bottom'}
-                )
-            ], style={'marginBottom': '20px', 'textAlign': 'left'}),
+                html.Div([
+                    html.Button(
+                        [html.I(className="fas fa-sync", style={'marginRight': '8px'}), "Refresh Queue"],
+                        id="queue-refresh-btn",
+                        style={
+                            'fontSize': '0.9rem',
+                            'padding': '8px 16px',
+                            'backgroundColor': 'rgba(90, 122, 96, 0.1)',
+                            'color': '#5A7A60',
+                            'border': '1px solid rgba(90, 122, 96, 0.3)',
+                            'borderRadius': '5px',
+                            'fontWeight': '500',
+                            'cursor': 'pointer',
+                            'marginTop': '24px',
+                            'whiteSpace': 'nowrap'
+                        }
+                    )
+                ], style={'flex': '0 0 auto'})
+            ], style={
+                'display': 'flex',
+                'alignItems': 'flex-start',
+                'gap': '20px',
+                'marginBottom': '20px',
+                'flexWrap': 'wrap'
+            }),
             
             # Jobs table
             html.Div(id="queue-jobs-table"),
             
             # Auto-refresh interval
             dcc.Interval(id='queue-refresh-interval', interval=10000, n_intervals=0),  # Refresh every 10 seconds
+            
+            # Dashboard modal
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.Div([
+                            html.H5("Dashboard Ready", className="modal-title"),
+                            html.Button("×", id='close-dashboard-modal', className="close", 
+                                      style={'fontSize': '1.5rem', 'border': 'none', 'background': 'none'})
+                        ], className="modal-header"),
+                        html.Div([
+                            html.P(id='dashboard-modal-message', children="Dashboard is starting..."),
+                            html.Div([
+                                html.A("Open Dashboard", 
+                                      id='dashboard-link',
+                                      href="",
+                                      target="_blank",
+                                      className="btn btn-success",
+                                      style={'display': 'none'})
+                            ], style={'textAlign': 'center', 'marginTop': '20px'})
+                        ], className="modal-body"),
+                        html.Div([
+                            html.Button("Close", id='close-dashboard-modal-btn', className="btn btn-secondary")
+                        ], className="modal-footer")
+                    ], className="modal-content")
+                ], className="modal-dialog")
+            ], id='dashboard-modal', className="modal", style={'display': 'none'}),
             
             # Back button
             html.Div([
@@ -797,6 +900,26 @@ def create_results_page(job_id: str):
             ], style={'textAlign': 'center', 'marginTop': '20px'})
         ], style={'maxWidth': '1000px', 'margin': '0 auto', 'padding': '20px'})
     ])
+
+def create_dashboard_page(job_id: str):
+    """Create dashboard viewing page - shows only the dashboard iframe."""
+    return html.Div([
+        dcc.Location(id='dashboard-url', refresh=False),
+        dcc.Store(id='dashboard-job-id', data=job_id),
+        dcc.Interval(id='dashboard-readiness-interval', interval=2000, n_intervals=0),  # Check every 2 seconds
+        
+        # Dashboard content (full screen, no header)
+        html.Div(id="dashboard-status-content", style={
+            'width': '100vw',
+            'height': '100vh',
+            'margin': '0',
+            'padding': '0',
+            'position': 'fixed',
+            'top': '0',
+            'left': '0',
+            'overflow': 'hidden'
+        })
+    ], style={'margin': '0', 'padding': '0'})
 
 # Main layout with URL routing
 app.layout = html.Div([
@@ -854,53 +977,9 @@ def display_page(pathname):
         job_id = pathname.split('/')[-1]
         return create_results_page(job_id)
     elif pathname.startswith('/dashboard/'):
-        # Dashboard page - redirect to dashboard server
+        # Dashboard viewing page with readiness check
         job_id = pathname.split('/')[-1]
-        
-        try:
-            # Get dashboard URL from backend
-            backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard"
-            response = requests.get(backend_url, timeout=10)
-            
-            if response.status_code == 200:
-                dashboard_data = response.json()
-                dashboard_url = dashboard_data.get('dashboard_url')
-                
-                return html.Div([
-                    dcc.Location(id=f'dashboard-redirect-{job_id}', href=dashboard_url, refresh=True),
-                    html.Div([
-                        html.H1([
-                            html.I(className="fas fa-chart-network", style={'marginRight': '12px'}),
-                            "Loading Dashboard..."
-                        ], className="main-title"),
-                        html.P(f"Redirecting to dashboard for job: {job_id}", 
-                              style={'textAlign': 'center', 'color': '#5A7A60'}),
-                        html.Div([
-                            html.I(className="fas fa-spinner fa-spin", style={'marginRight': '8px'}),
-                            "Please wait while we load your interactive dashboard..."
-                        ], style={'textAlign': 'center', 'padding': '20px'})
-                    ], style={'maxWidth': '600px', 'margin': '50px auto', 'textAlign': 'center'})
-                ])
-            else:
-                return html.Div([
-                    html.H1("Dashboard Error"),
-                    html.Div([
-                        html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                        f"Failed to load dashboard: {response.status_code}"
-                    ], className="alert alert-danger"),
-                    html.A("Go back to main page", href="/", className="btn btn-secondary")
-                ])
-                
-        except Exception as e:
-            logger.error(f"Error accessing dashboard for job {job_id}: {e}")
-            return html.Div([
-                html.H1("Dashboard Error"),
-                html.Div([
-                    html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                    f"Error loading dashboard: {str(e)}"
-                ], className="alert alert-danger"),
-                html.A("Go back to main page", href="/", className="btn btn-secondary")
-            ])
+        return create_dashboard_page(job_id)
     elif pathname == '/queue':
         # Public job queue page
         return create_job_queue_page()
@@ -972,7 +1051,7 @@ def update_mode_instructions(mode):
                 
                 html.Div([
                     html.Strong("Optional: "),
-                    "Restraint files (.itp), topology includes"
+                    "Restraint files (.itp), topology includes (.top), parameter files (.prm), or force field folders"
                 ], style={'fontSize': '0.85rem', 'color': '#666'})
             ])
         ], style={'padding': '12px', 'backgroundColor': '#f8f9fa', 'borderRadius': '5px', 'border': '1px solid #dee2e6'})
@@ -1038,7 +1117,7 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
             validation_messages.append(
                 html.Div([
                     html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                    f"Unsupported file type: {filename}. Supported formats: PDB, XTC, TRR, TPR, GRO, TOP, ITP, RTP."
+                    f"Unsupported file type: {filename}. Supported formats: PDB, XTC, TRR, TPR, GRO, TOP, ITP, RTP, PRM, ZIP."
                 ], className="alert alert-warning")
             )
             continue
@@ -1070,27 +1149,90 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
         if not any(f['filename'] == filename for f in files):
             files.append(file_data)
     
-    # Create file list display
-    file_list_items = []
+    # Create file list display with table layout
+    def get_file_purpose(file_type):
+        """Return the purpose/usage of each file type in gRINN workflow."""
+        purpose_map = {
+            'pdb': 'Structure file - Input protein structure',
+            'gro': 'Structure file - GROMACS coordinate file',
+            'xtc': 'Trajectory file - Compressed trajectory data',
+            'trr': 'Trajectory file - Full-precision trajectory',
+            'tpr': 'Topology file - Processed GROMACS topology',
+            'top': 'Topology file - Molecular topology definition',
+            'itp': 'Include topology - Force field parameters',
+            'rtp': 'Residue topology - Residue definitions',
+            'prm': 'Parameters - Force field parameters',
+            'zip': 'Force field archive - Custom force field files'
+        }
+        return purpose_map.get(file_type, 'Unknown file type')
+    
+    # Create table header
+    table_header = html.Div([
+        html.Div('Filename', style={'flex': '2', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057'}),
+        html.Div('Type', style={'flex': '0.6', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057'}),
+        html.Div('Purpose in gRINN', style={'flex': '2.5', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057'}),
+        html.Div('Size', style={'flex': '0.6', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057', 'textAlign': 'right'}),
+        html.Div('', style={'flex': '0.4', 'fontWeight': '500', 'fontSize': '0.85rem'}),
+    ], style={
+        'display': 'flex',
+        'alignItems': 'center',
+        'padding': '10px 12px',
+        'backgroundColor': '#f8f9fa',
+        'borderBottom': '2px solid #dee2e6',
+        'borderRadius': '5px 5px 0 0'
+    })
+    
+    # Create table rows
+    file_list_items = [table_header]
     for file_data in files:
         size_mb = file_data['size_bytes'] / (1024 * 1024)
+        file_type = file_data['file_type']
+        purpose = get_file_purpose(file_type)
+        
         file_list_items.append(
             html.Div([
-                html.Div([
-                    html.I(className="fas fa-file file-icon"),
-                    html.Span(file_data['filename'], className="file-name"),
-                    html.Span(f" ({size_mb:.1f} MB)", className="file-size")
-                ], className="file-info"),
+                html.Div(
+                    file_data['filename'],
+                    style={'flex': '2', 'fontSize': '0.85rem', 'color': '#212529', 'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap'},
+                    title=file_data['filename']
+                ),
+                html.Div(
+                    f".{file_type.upper()}",
+                    style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontWeight': '500'}
+                ),
+                html.Div(
+                    purpose,
+                    style={'flex': '2.5', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontStyle': 'italic'}
+                ),
+                html.Div(
+                    f"{size_mb:.1f} MB",
+                    style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'textAlign': 'right'}
+                ),
                 html.Div([
                     html.Button(
                         html.I(className="fas fa-trash"),
                         id={'type': 'remove-file', 'index': files.index(file_data)},
-                        className="btn btn-danger",
-                        style={'fontSize': '0.8rem', 'padding': '4px 8px'},
+                        style={
+                            'fontSize': '0.75rem',
+                            'padding': '4px 8px',
+                            'backgroundColor': 'rgba(220, 53, 69, 0.1)',
+                            'color': '#dc3545',
+                            'border': '1px solid rgba(220, 53, 69, 0.3)',
+                            'borderRadius': '3px',
+                            'cursor': 'pointer',
+                            'fontWeight': '500'
+                        },
                         title=f"Remove {file_data['filename']}"
                     )
-                ], className="file-actions")
-            ], className="file-item")
+                ], style={'flex': '0.4', 'display': 'flex', 'justifyContent': 'center'})
+            ], style={
+                'display': 'flex',
+                'alignItems': 'center',
+                'padding': '8px 12px',
+                'borderBottom': '1px solid #e9ecef',
+                'backgroundColor': '#ffffff',
+                'transition': 'background-color 0.2s',
+            }, className='file-table-row')
         )
     
     # Validation based on input mode
@@ -1198,7 +1340,19 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
             'border': '1px dashed #dee2e6'
         }
     
-    return file_list_items, style, validation_messages, files, submit_disabled, submit_message, submit_style
+    # Wrap file list in a container with border
+    file_list_container = html.Div(
+        file_list_items,
+        style={
+            'border': '1px solid #dee2e6',
+            'borderRadius': '5px',
+            'backgroundColor': '#ffffff',
+            'overflow': 'hidden',
+            'marginBottom': '15px'
+        }
+    )
+    
+    return file_list_container, style, validation_messages, files, submit_disabled, submit_message, submit_style
 
 @app.callback(
     [Output('parameters-content', 'style'),
@@ -1264,27 +1418,90 @@ def update_file_display_on_removal(stored_files, input_mode):
     files = stored_files
     input_mode = input_mode or 'trajectory'
     
-    # Create file list display (same logic as in handle_file_upload)
-    file_list_items = []
+    # Create file list display with table layout (same logic as in handle_file_upload)
+    def get_file_purpose(file_type):
+        """Return the purpose/usage of each file type in gRINN workflow."""
+        purpose_map = {
+            'pdb': 'Structure file - Input protein structure',
+            'gro': 'Structure file - GROMACS coordinate file',
+            'xtc': 'Trajectory file - Compressed trajectory data',
+            'trr': 'Trajectory file - Full-precision trajectory',
+            'tpr': 'Topology file - Processed GROMACS topology',
+            'top': 'Topology file - Molecular topology definition',
+            'itp': 'Include topology - Force field parameters',
+            'rtp': 'Residue topology - Residue definitions',
+            'prm': 'Parameters - Force field parameters',
+            'zip': 'Force field archive - Custom force field files'
+        }
+        return purpose_map.get(file_type, 'Unknown file type')
+    
+    # Create table header
+    table_header = html.Div([
+        html.Div('Filename', style={'flex': '2', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057'}),
+        html.Div('Type', style={'flex': '0.6', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057'}),
+        html.Div('Purpose in gRINN', style={'flex': '2.5', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057'}),
+        html.Div('Size', style={'flex': '0.6', 'fontWeight': '500', 'fontSize': '0.85rem', 'color': '#495057', 'textAlign': 'right'}),
+        html.Div('', style={'flex': '0.4', 'fontWeight': '500', 'fontSize': '0.85rem'}),
+    ], style={
+        'display': 'flex',
+        'alignItems': 'center',
+        'padding': '10px 12px',
+        'backgroundColor': '#f8f9fa',
+        'borderBottom': '2px solid #dee2e6',
+        'borderRadius': '5px 5px 0 0'
+    })
+    
+    # Create table rows
+    file_list_items = [table_header]
     for file_data in files:
         size_mb = file_data['size_bytes'] / (1024 * 1024)
+        file_type = file_data['file_type']
+        purpose = get_file_purpose(file_type)
+        
         file_list_items.append(
             html.Div([
-                html.Div([
-                    html.I(className="fas fa-file file-icon"),
-                    html.Span(file_data['filename'], className="file-name"),
-                    html.Span(f" ({size_mb:.1f} MB)", className="file-size")
-                ], className="file-info"),
+                html.Div(
+                    file_data['filename'],
+                    style={'flex': '2', 'fontSize': '0.85rem', 'color': '#212529', 'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap'},
+                    title=file_data['filename']
+                ),
+                html.Div(
+                    f".{file_type.upper()}",
+                    style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontWeight': '500'}
+                ),
+                html.Div(
+                    purpose,
+                    style={'flex': '2.5', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontStyle': 'italic'}
+                ),
+                html.Div(
+                    f"{size_mb:.1f} MB",
+                    style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'textAlign': 'right'}
+                ),
                 html.Div([
                     html.Button(
                         html.I(className="fas fa-trash"),
                         id={'type': 'remove-file', 'index': files.index(file_data)},
-                        className="btn btn-danger",
-                        style={'fontSize': '0.8rem', 'padding': '4px 8px'},
+                        style={
+                            'fontSize': '0.75rem',
+                            'padding': '4px 8px',
+                            'backgroundColor': 'rgba(220, 53, 69, 0.1)',
+                            'color': '#dc3545',
+                            'border': '1px solid rgba(220, 53, 69, 0.3)',
+                            'borderRadius': '3px',
+                            'cursor': 'pointer',
+                            'fontWeight': '500'
+                        },
                         title=f"Remove {file_data['filename']}"
                     )
-                ], className="file-actions")
-            ], className="file-item")
+                ], style={'flex': '0.4', 'display': 'flex', 'justifyContent': 'center'})
+            ], style={
+                'display': 'flex',
+                'alignItems': 'center',
+                'padding': '8px 12px',
+                'borderBottom': '1px solid #e9ecef',
+                'backgroundColor': '#ffffff',
+                'transition': 'background-color 0.2s',
+            }, className='file-table-row')
         )
     
     # Validation based on input mode
@@ -1363,7 +1580,19 @@ def update_file_display_on_removal(stored_files, input_mode):
             'textAlign': 'center'
         }
     
-    return file_list_items, {'display': 'block'}, validation_messages, submit_disabled, status_message, status_style
+    # Wrap file list in a container with border
+    file_list_container = html.Div(
+        file_list_items,
+        style={
+            'border': '1px solid #dee2e6',
+            'borderRadius': '5px',
+            'backgroundColor': '#ffffff',
+            'overflow': 'hidden',
+            'marginBottom': '15px'
+        }
+    )
+    
+    return file_list_container, {'display': 'block'}, validation_messages, submit_disabled, status_message, status_style
 
 # Clear upload component when files are removed to allow re-uploading the same file
 @app.callback(
@@ -1449,11 +1678,8 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         return html.Div("Please upload files to submit a job.", className="alert alert-danger"), no_update
     
     try:
-        # Generate job name automatically based on timestamp and files
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        structure_file = next((f['filename'] for f in uploaded_files if f['file_type'] in ['gro', 'pdb']), 'structure')
-        mode_prefix = "ensemble" if input_mode == 'ensemble' else "trajectory"
-        job_name = f"gRINN_{mode_prefix}_{structure_file.split('.')[0]}_{timestamp}"
+        # Job name is optional - will be None if not provided
+        job_name = None
         
         # Step 1: Request signed URLs from backend
         files_info = []
@@ -1599,24 +1825,32 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         
         logger.info(f"Job {job_id} submitted successfully")
         
-        # Show success message and auto-open monitoring page
-        success_message = html.Div([
-            html.Div([
+        # Show compact success message with clickable link
+        monitor_url = f"/monitor/{job_id}"
+        
+        # Add extra warning for private jobs
+        if is_private:
+            success_message = html.Div([
+                html.Div([
+                    html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
+                    html.Span("Job submitted! ", style={'fontWeight': 'bold'}),
+                    html.Span(f"ID: {job_id} | ", style={'marginRight': '5px'}),
+                    html.A("Monitor →", href=monitor_url, target="_blank", 
+                           style={'fontWeight': 'bold', 'textDecoration': 'underline'})
+                ]),
+                html.Div([
+                    html.I(className="fas fa-bookmark", style={'color': '#FFA500', 'marginRight': '5px', 'fontSize': '0.85rem'}),
+                    html.Small("Private job - bookmark the monitoring page!", style={'fontSize': '0.85rem'})
+                ], style={'marginTop': '5px'})
+            ], className="alert alert-success", style={'padding': '10px 15px'})
+        else:
+            success_message = html.Div([
                 html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
-                html.Strong("Job submitted successfully!")
-            ], className="alert alert-success"),
-            
-            html.Div([
-                html.P(f"Job ID: {job_id}"),
-                html.P(f"Job Name: {job_name}"),
-                html.P(f"Analysis Mode: {input_mode or 'trajectory'}"),
-                html.P(f"Files uploaded: {len(uploaded_successfully)}"),
-                html.P("Monitoring page will open in a new tab automatically."),
-            ], className="info-card"),
-            
-            # Hidden div to trigger client-side callback
-            html.Div(job_id, id="job-id-trigger", style={'display': 'none'})
-        ])
+                html.Span("Job submitted! ", style={'fontWeight': 'bold'}),
+                html.Span(f"ID: {job_id} | ", style={'marginRight': '5px'}),
+                html.A("Monitor →", href=monitor_url, target="_blank", 
+                       style={'fontWeight': 'bold', 'textDecoration': 'underline'})
+            ], className="alert alert-success", style={'padding': '10px 15px'})
         
         # Clear uploaded files after successful submission
         return success_message, []
@@ -1627,22 +1861,6 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
             f"Error submitting job: {str(e)}"
         ], className="alert alert-danger"), no_update
-
-# Client-side callback to open monitoring page in new tab
-app.clientside_callback(
-    """
-    function(job_id) {
-        if (job_id && job_id !== '') {
-            // Open monitoring page in new tab
-            window.open('/monitor/' + job_id, '_blank');
-        }
-        return '';
-    }
-    """,
-    Output('job-id-trigger', 'children'),
-    Input('job-id-trigger', 'children'),
-    prevent_initial_call=True
-)
 
 # Monitoring page callbacks
 @app.callback(
@@ -1673,30 +1891,50 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
         
         # Create detailed job information
         job_details = html.Div([
-            html.H3("Job Details", style={'color': '#5A7A60', 'marginBottom': '15px'}),
+            html.H3("Job Details", style={'color': '#5A7A60', 'marginBottom': '15px', 'fontSize': '0.9rem'}),
             
             html.Div([
                 # Job info cards
                 html.Div([
                     html.Div([
-                        html.H5(job.job_name or f"Job {job.job_id[:8]}", style={'margin': '0'}),
-                        html.P(job.description or "No description", style={'margin': '5px 0', 'color': '#666'}),
-                        html.Small(f"Created: {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}", style={'color': '#8A9A8A'})
+                        html.H5(job.job_name or job.job_id, style={'margin': '0', 'fontSize': '0.9rem'}),
+                        html.P(job.description or "No description", style={'margin': '5px 0', 'color': '#666', 'fontSize': '0.9rem'}),
+                        html.Small(f"Created: {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}", style={'color': '#8A9A8A', 'fontSize': '0.85rem'})
                     ], className="panel", style={'flex': '1', 'marginRight': '10px'}),
                     
                     html.Div([
-                        html.H5("Status", style={'margin': '0 0 10px 0'}),
-                        html.Span(job.status.value.title() if isinstance(job.status, JobStatus) else job.status.title(), 
-                                className=f"job-status status-{job.status.value if isinstance(job.status, JobStatus) else job.status}",
-                                style={'fontSize': '1.1rem', 'padding': '8px 16px'}),
-                        html.P(job.current_step or "No current step", 
-                              style={'margin': '10px 0 0 0', 'color': '#5A7A60'})
+                        html.Div([
+                            html.H5("Status", style={'margin': '0 0 10px 0', 'fontSize': '0.9rem'}),
+                            html.Div([
+                                html.Span(job.status.value.title() if isinstance(job.status, JobStatus) else job.status.title(), 
+                                        className=f"job-status status-{job.status.value if isinstance(job.status, JobStatus) else job.status}",
+                                        style={'marginRight': '10px' if (isinstance(job.status, JobStatus) and job.status == JobStatus.COMPLETED) or (isinstance(job.status, str) and job.status.lower() == 'completed') else '0'}),
+                                # Show Launch Dashboard button only if job is completed
+                                html.Button(
+                                    [html.I(className="fas fa-chart-line", style={'marginRight': '8px'}), "Launch Dashboard"],
+                                    id="monitor-launch-dashboard-btn",
+                                    style={
+                                        'fontSize': '0.9rem',
+                                        'padding': '6px 12px',
+                                        'verticalAlign': 'middle',
+                                        'backgroundColor': 'rgba(40, 167, 69, 0.1)',
+                                        'color': '#28a745',
+                                        'border': '1px solid rgba(40, 167, 69, 0.3)',
+                                        'borderRadius': '5px',
+                                        'fontWeight': '500',
+                                        'cursor': 'pointer'
+                                    }
+                                ) if (isinstance(job.status, JobStatus) and job.status == JobStatus.COMPLETED) or (isinstance(job.status, str) and job.status.lower() == 'completed') else html.Span()
+                            ], style={'display': 'flex', 'alignItems': 'center'}),
+                            html.P(job.current_step or "No current step", 
+                                  style={'margin': '10px 0 0 0', 'color': '#5A7A60', 'fontSize': '0.9rem'})
+                        ])
                     ], className="panel", style={'flex': '1', 'marginLeft': '10px'})
                 ], style={'display': 'flex', 'marginBottom': '20px'}),
                 
                 # Progress section
                 html.Div([
-                    html.H5("Progress", style={'marginBottom': '10px'}),
+                    html.H5("Progress", style={'marginBottom': '10px', 'fontSize': '0.9rem'}),
                     
                     # Progress bar
                     html.Div([
@@ -1717,31 +1955,60 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
                 
                 # Files section
                 html.Div([
-                    html.H5("Input Files", style={'marginBottom': '10px'}),
+                    html.H5("Input Files", style={'marginBottom': '10px', 'fontSize': '0.9rem'}),
                     html.Ul([
                         html.Li([
                             html.I(className="fas fa-file", style={'marginRight': '8px', 'color': '#5A7A60'}),
                             f"{file_info.filename} ({file_info.file_type.value.upper()}, {file_info.size_bytes/1024/1024:.1f} MB)"
-                        ]) for file_info in job.input_files
-                    ] if job.input_files else [html.Li("No files information available")])
+                        ], style={'fontSize': '0.9rem'}) for file_info in job.input_files
+                    ] if job.input_files else [html.Li("No files information available", style={'fontSize': '0.9rem'})])
                 ], className="panel", style={'marginTop': '20px'})
             ])
         ])
         
-        # Create log section (placeholder for now)
+        # Create log section - fetch real container logs
+        job_logs_content = "No logs available yet."
+        log_color = '#666'
+        log_bg_color = '#f8f9fa'
+        
+        try:
+            # Fetch logs from backend API
+            logs_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/logs"
+            logs_response = requests.get(logs_url, params={'tail': 500}, timeout=5)
+            
+            if logs_response.status_code == 200:
+                logs_data = logs_response.json()
+                if logs_data.get('success') and logs_data.get('logs'):
+                    job_logs_content = logs_data['logs']
+                    # Use terminal-like styling for container logs
+                    log_bg_color = '#1e1e1e'
+                    log_color = '#d4d4d4'
+                elif job.error_message:
+                    job_logs_content = job.error_message
+                    log_color = '#d32f2f'
+        except Exception as log_error:
+            logger.warning(f"Could not fetch logs for job {job_id}: {log_error}")
+            # Fall back to error message if available
+            if job.error_message:
+                job_logs_content = job.error_message
+                log_color = '#d32f2f'
+        
         job_logs = html.Div([
-            html.H3("Job Logs", style={'color': '#5A7A60', 'marginBottom': '15px'}),
+            html.H3("Job Logs", style={'color': '#5A7A60', 'marginBottom': '15px', 'fontSize': '0.9rem'}),
             html.Div([
                 html.Pre(
-                    job.error_message if job.error_message else "No logs available yet.",
+                    job_logs_content,
                     style={
-                        'backgroundColor': '#f8f9fa', 
-                        'padding': '15px', 
+                        'backgroundColor': log_bg_color,
+                        'padding': '15px',
                         'borderRadius': '5px',
-                        'fontSize': '0.9rem',
-                        'maxHeight': '300px',
+                        'fontSize': '0.85rem',
+                        'fontFamily': 'monospace',
+                        'maxHeight': '400px',
                         'overflow': 'auto',
-                        'color': '#d32f2f' if job.error_message else '#666'
+                        'color': log_color,
+                        'whiteSpace': 'pre-wrap',
+                        'wordWrap': 'break-word'
                     }
                 )
             ], className="panel")
@@ -1987,11 +2254,12 @@ def handle_cancel_job(n_clicks, button_id):
     Output('queue-jobs-table', 'children'),
     [Input('queue-refresh-interval', 'n_intervals'),
      Input('queue-refresh-btn', 'n_clicks'),
-     Input('queue-status-filter', 'value')],
+     Input('queue-status-filter', 'value'),
+     Input('queue-search-input', 'value')],
     prevent_initial_call=False
 )
-def update_job_queue(n_intervals, refresh_clicks, status_filter):
-    """Update the job queue table."""
+def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
+    """Update the job queue table with optional search filter."""
     try:
         # Fetch jobs from backend
         backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs"
@@ -2010,21 +2278,26 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter):
         data = response.json()
         jobs = data.get('jobs', [])
         
+        # Apply client-side search filter
+        if search_text and search_text.strip():
+            search_text = search_text.strip().lower()
+            jobs = [job for job in jobs if search_text in job.get('job_id', '').lower()]
+        
         if not jobs:
+            message = f"No jobs found matching '{search_text}'." if search_text else "No jobs found in the queue."
             return html.Div([
                 html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
-                "No jobs found in the queue."
+                message
             ], className="alert alert-info", style={'textAlign': 'center'})
         
         # Create jobs table
         table_header = html.Thead([
             html.Tr([
-                html.Th("Job ID", style={'width': '15%'}),
-                html.Th("Name", style={'width': '25%'}),
-                html.Th("Status", style={'width': '15%'}),
-                html.Th("Created", style={'width': '20%'}),
-                html.Th("Progress", style={'width': '15%'}),
-                html.Th("Actions", style={'width': '10%'})
+                html.Th("Job ID", style={'width': '25%', 'fontSize': '0.9rem'}),
+                html.Th("Status", style={'width': '15%', 'fontSize': '0.9rem'}),
+                html.Th("Created", style={'width': '20%', 'fontSize': '0.9rem'}),
+                html.Th("Progress", style={'width': '20%', 'fontSize': '0.9rem'}),
+                html.Th("Actions", style={'width': '20%', 'fontSize': '0.9rem'})
             ])
         ])
         
@@ -2085,22 +2358,48 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter):
                     html.I(className="fas fa-eye", title="Monitor"),
                     href=f"/monitor/{job_id}",
                     target="_blank",
-                    className="btn btn-sm btn-outline-primary",
-                    style={'marginRight': '5px'}
+                    style={
+                        'display': 'inline-block',
+                        'padding': '6px 12px',
+                        'marginRight': '5px',
+                        'backgroundColor': 'rgba(0, 123, 255, 0.1)',
+                        'color': '#007bff',
+                        'textDecoration': 'none',
+                        'border': '1px solid rgba(0, 123, 255, 0.3)',
+                        'borderRadius': '5px',
+                        'fontSize': '0.9rem',
+                        'fontWeight': '500'
+                    }
+                ),
+                html.Button(
+                    html.I(className="fas fa-chart-line", title="Launch Dashboard"),
+                    id={'type': 'launch-dashboard-btn', 'job_id': job_id},
+                    disabled=(status not in ['completed']),
+                    style={
+                        'padding': '6px 12px',
+                        'marginRight': '5px',
+                        'backgroundColor': 'rgba(40, 167, 69, 0.1)' if status == 'completed' else 'rgba(40, 167, 69, 0.05)',
+                        'color': '#28a745' if status == 'completed' else 'rgba(40, 167, 69, 0.5)',
+                        'border': '1px solid rgba(40, 167, 69, 0.3)' if status == 'completed' else '1px solid rgba(40, 167, 69, 0.2)',
+                        'borderRadius': '5px',
+                        'fontSize': '0.9rem',
+                        'fontWeight': '500',
+                        'cursor': 'pointer' if status == 'completed' else 'not-allowed',
+                        'opacity': '1' if status == 'completed' else '0.5'
+                    }
                 )
-            ])
+            ], style={'display': 'flex', 'gap': '5px'})
             
-            # Privacy indicator
-            name_display = job_name
+            # Privacy indicator for job ID display
+            job_id_display = job_id
             if is_private:
-                name_display = html.Span([
+                job_id_display = html.Span([
                     html.I(className="fas fa-lock", style={'marginRight': '5px', 'color': '#6c757d'}),
-                    job_name
+                    job_id
                 ])
             
             table_rows.append(html.Tr([
-                html.Td(job_id[:8] + "...", style={'font-family': 'monospace'}),
-                html.Td(name_display),
+                html.Td(job_id_display, style={'font-family': 'monospace', 'fontSize': '0.9rem'}),
                 html.Td(status_badge),
                 html.Td(created_display, style={'fontSize': '0.9rem'}),
                 html.Td(progress_bar),
@@ -2129,6 +2428,343 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter):
             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
             f"Error loading job queue: {str(e)}"
         ], className="alert alert-danger")
+
+
+# ============================================================================
+# Dashboard Management Callbacks
+# ============================================================================
+
+@app.callback(
+    Output('dashboard-url-store', 'data'),
+    [Input({'type': 'launch-dashboard-btn', 'job_id': ALL}, 'n_clicks')],
+    [State({'type': 'launch-dashboard-btn', 'job_id': ALL}, 'id')],
+    prevent_initial_call=True
+)
+def launch_dashboard(n_clicks_list, button_ids):
+    """Handle dashboard launch button clicks - store URL to open in new tab."""
+    import requests
+    
+    # Handle empty lists or no clicks
+    if not n_clicks_list or not button_ids or not any(n_clicks_list):
+        return no_update
+    
+    # Find which button was clicked
+    clicked_idx = None
+    for i, clicks in enumerate(n_clicks_list):
+        if clicks and clicks > 0:
+            clicked_idx = i
+            break
+    
+    if clicked_idx is None or clicked_idx >= len(button_ids):
+        return no_update
+    
+    job_id = button_ids[clicked_idx]['job_id']
+    
+    try:
+        # Call backend API to start dashboard
+        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
+        response = requests.post(backend_url, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                # Return URL to be opened in new tab by clientside callback
+                return f"/dashboard/{job_id}"
+            else:
+                logger.error(f"Failed to start dashboard: {data.get('error')}")
+                return no_update
+        else:
+            logger.error(f"Server returned {response.status_code}")
+            return no_update
+            
+    except Exception as e:
+        logger.error(f"Error launching dashboard for {job_id}: {e}")
+        return no_update
+
+
+# Clientside callback to open dashboard in new tab
+app.clientside_callback(
+    """
+    function(url) {
+        if (url) {
+            window.open(url, '_blank');
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('dashboard-url-store', 'data', allow_duplicate=True),
+    Input('dashboard-url-store', 'data'),
+    prevent_initial_call=True
+)
+
+
+@app.callback(
+    Output('dashboard-modal', 'style', allow_duplicate=True),
+    [Input('close-dashboard-modal', 'n_clicks'),
+     Input('close-dashboard-modal-btn', 'n_clicks')],
+    prevent_initial_call=True
+)
+def close_dashboard_modal(close_x, close_btn):
+    """Close the dashboard modal."""
+    return {'display': 'none'}
+
+
+@app.callback(
+    Output('monitor-dashboard-url-store', 'data'),
+    [Input('monitor-launch-dashboard-btn', 'n_clicks')],
+    [State('monitor-job-id', 'data')],
+    prevent_initial_call=True
+)
+def launch_monitor_dashboard(n_clicks, job_id):
+    """Handle dashboard launch from monitor page - store URL to open in new tab."""
+    import requests
+    
+    if not n_clicks:
+        return no_update
+    
+    try:
+        # Call backend API to start dashboard
+        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
+        response = requests.post(backend_url, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                # Return URL to be opened in new tab by clientside callback
+                return f"/dashboard/{job_id}"
+            else:
+                logger.error(f"Failed to start dashboard: {data.get('error')}")
+                return no_update
+        else:
+            logger.error(f"Server returned {response.status_code}")
+            return no_update
+            
+    except Exception as e:
+        logger.error(f"Error launching dashboard for {job_id}: {e}")
+        return no_update
+
+
+# Clientside callback to open monitor dashboard in new tab
+app.clientside_callback(
+    """
+    function(url) {
+        if (url) {
+            window.open(url, '_blank');
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('monitor-dashboard-url-store', 'data', allow_duplicate=True),
+    Input('monitor-dashboard-url-store', 'data'),
+    prevent_initial_call=True
+)
+
+
+@app.callback(
+    Output('monitor-dashboard-modal', 'style', allow_duplicate=True),
+    [Input('close-monitor-dashboard-modal', 'n_clicks'),
+     Input('close-monitor-dashboard-modal-btn', 'n_clicks')],
+    prevent_initial_call=True
+)
+def close_monitor_dashboard_modal(close_x, close_btn):
+    """Close the monitor dashboard modal."""
+    return {'display': 'none'}
+
+
+# ============================================================================
+# Dashboard Viewer Page Callbacks
+# ============================================================================
+
+@app.callback(
+    Output('dashboard-status-content', 'children'),
+    [Input('dashboard-readiness-interval', 'n_intervals')],
+    [State('dashboard-job-id', 'data')],
+    prevent_initial_call=False
+)
+def update_dashboard_status(n_intervals, job_id):
+    """Update dashboard status and show iframe when ready. Auto-start if not running."""
+    import requests
+    
+    try:
+        # Get job details
+        job_backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}"
+        job_response = requests.get(job_backend_url, timeout=10)
+        
+        if job_response.status_code != 200:
+            return html.Div([
+                html.Div([
+                    html.I(className="fas fa-exclamation-triangle", 
+                          style={'fontSize': '3rem', 'color': '#dc3545', 'marginBottom': '20px'}),
+                    html.H3(f"Job not found: {job_id}", style={'color': '#5A7A60'})
+                ], style={
+                    'textAlign': 'center',
+                    'paddingTop': '20vh',
+                    'display': 'flex',
+                    'flexDirection': 'column',
+                    'alignItems': 'center'
+                })
+            ])
+        
+        job_data = job_response.json()
+        job_name = job_data.get('job_name') or f"Job {job_id[:12]}"
+        
+        # Check dashboard status
+        status_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/status"
+        status_response = requests.get(status_url, timeout=10)
+        
+        if status_response.status_code != 200:
+            # Dashboard not started - auto-start it
+            try:
+                start_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
+                start_response = requests.post(start_url, timeout=30)
+                if start_response.status_code == 200:
+                    # Successfully triggered start, show loading screen
+                    return html.Div([
+                        html.Div([
+                            html.I(className="fas fa-spinner fa-spin", 
+                                  style={'fontSize': '3rem', 'color': '#7C9885', 'marginBottom': '20px'}),
+                            html.H3("Starting Dashboard...", style={'color': '#5A7A60', 'marginBottom': '10px'}),
+                            html.P("Please wait while we prepare your data visualization.", 
+                                  style={'color': '#666', 'fontSize': '1.1rem'})
+                        ], style={
+                            'textAlign': 'center',
+                            'paddingTop': '20vh',
+                            'display': 'flex',
+                            'flexDirection': 'column',
+                            'alignItems': 'center'
+                        })
+                    ])
+            except Exception as e:
+                logger.error(f"Failed to auto-start dashboard: {e}")
+            
+            # If auto-start failed, show error
+            return html.Div([
+                html.Div([
+                    html.I(className="fas fa-exclamation-circle", 
+                          style={'fontSize': '3rem', 'color': '#ffc107', 'marginBottom': '20px'}),
+                    html.H3("Dashboard Not Available", style={'color': '#5A7A60', 'marginBottom': '10px'}),
+                    html.P(f"Could not start dashboard for job: {job_id}", 
+                          style={'color': '#666', 'fontSize': '1rem'})
+                ], style={
+                    'textAlign': 'center',
+                    'paddingTop': '20vh',
+                    'display': 'flex',
+                    'flexDirection': 'column',
+                    'alignItems': 'center'
+                })
+            ])
+        
+        status_data = status_response.json()
+        
+        if not status_data.get('running'):
+            # Dashboard not running - try to start it
+            try:
+                start_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
+                start_response = requests.post(start_url, timeout=30)
+                if start_response.status_code == 200:
+                    return html.Div([
+                        html.Div([
+                            html.I(className="fas fa-spinner fa-spin", 
+                                  style={'fontSize': '3rem', 'color': '#7C9885', 'marginBottom': '20px'}),
+                            html.H3("Starting Dashboard...", style={'color': '#5A7A60', 'marginBottom': '10px'}),
+                            html.P("Please wait while we prepare your data visualization.", 
+                                  style={'color': '#666', 'fontSize': '1.1rem'})
+                        ], style={
+                            'textAlign': 'center',
+                            'paddingTop': '20vh',
+                            'display': 'flex',
+                            'flexDirection': 'column',
+                            'alignItems': 'center'
+                        })
+                    ])
+            except Exception as e:
+                logger.error(f"Failed to start dashboard: {e}")
+            
+            return html.Div([
+                html.Div([
+                    html.I(className="fas fa-exclamation-circle", 
+                          style={'fontSize': '3rem', 'color': '#ffc107', 'marginBottom': '20px'}),
+                    html.H3("Dashboard Not Running", style={'color': '#5A7A60'})
+                ], style={
+                    'textAlign': 'center',
+                    'paddingTop': '20vh',
+                    'display': 'flex',
+                    'flexDirection': 'column',
+                    'alignItems': 'center'
+                })
+            ])
+        
+        if not status_data.get('ready'):
+            # Dashboard starting but not ready yet - show loading with logs
+            logs_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/logs"
+            try:
+                logs_response = requests.get(logs_url, timeout=5)
+                if logs_response.status_code == 200:
+                    logs_data = logs_response.json()
+                    logs_text = logs_data.get('logs', 'Initializing...')
+                else:
+                    logs_text = 'Preparing data...'
+            except:
+                logs_text = 'Preparing data...'
+            
+            return html.Div([
+                html.Div([
+                    html.I(className="fas fa-spinner fa-spin", 
+                          style={'fontSize': '3rem', 'color': '#7C9885', 'marginBottom': '20px'}),
+                    html.H3("Preparing Dashboard...", style={'color': '#5A7A60', 'marginBottom': '20px'}),
+                    html.Div([
+                        html.Pre(
+                            logs_text,
+                            style={
+                                'backgroundColor': '#1e1e1e',
+                                'color': '#d4d4d4',
+                                'padding': '20px',
+                                'borderRadius': '8px',
+                                'fontSize': '13px',
+                                'fontFamily': 'monospace',
+                                'maxHeight': '300px',
+                                'maxWidth': '800px',
+                                'overflowY': 'auto',
+                                'whiteSpace': 'pre-wrap',
+                                'wordWrap': 'break-word',
+                                'textAlign': 'left'
+                            }
+                        )
+                    ], style={'marginBottom': '20px'}),
+                    html.P("This typically takes 5-10 minutes. The page will update automatically.", 
+                          style={'color': '#666', 'fontSize': '0.95rem', 'fontStyle': 'italic'})
+                ], style={
+                    'textAlign': 'center',
+                    'paddingTop': '10vh',
+                    'display': 'flex',
+                    'flexDirection': 'column',
+                    'alignItems': 'center',
+                    'padding': '20px'
+                })
+            ])
+        
+        # Dashboard is ready! Show iframe in full screen
+        dashboard_url = status_data.get('url')
+        
+        return html.Iframe(
+            src=dashboard_url,
+            style={
+                'width': '100%',
+                'height': '100%',
+                'border': 'none',
+                'margin': '0',
+                'padding': '0',
+                'display': 'block'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error updating dashboard status for {job_id}: {e}")
+        return html.Div([
+            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+            f"Error loading dashboard: {str(e)}"
+        ], className="alert alert-danger")
+
 
 if __name__ == '__main__':
     try:

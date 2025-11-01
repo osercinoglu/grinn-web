@@ -45,6 +45,9 @@ class Config:
     grinn_docker_image: str = "grinn:latest"
     docker_timeout: int = 3600  # 1 hour default timeout
     
+    # Dashboard settings
+    dashboard_public_host: str = "localhost"  # Public hostname/IP for dashboard URLs
+    
     # Job settings
     max_trajectory_file_size_mb: int = 100
     max_other_file_size_mb: int = 10
@@ -107,6 +110,9 @@ class Config:
         # gRINN Docker
         self.grinn_docker_image = os.getenv("GRINN_DOCKER_IMAGE", self.grinn_docker_image)
         self.docker_timeout = int(os.getenv("DOCKER_TIMEOUT", self.docker_timeout))
+        
+        # Dashboard settings
+        self.dashboard_public_host = os.getenv("DASHBOARD_PUBLIC_HOST", self.dashboard_public_host)
         
         # Job settings
         self.max_trajectory_file_size_mb = int(os.getenv("MAX_TRAJECTORY_FILE_SIZE_MB", self.max_trajectory_file_size_mb))

@@ -4,17 +4,18 @@ Uses SQLAlchemy ORM for database operations.
 """
 
 import os
-import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, Column, String, DateTime, Text, Integer, Float, Boolean, JSON, text
+from sqlalchemy import create_engine, Column, String, DateTime, Text, Integer, Float, Boolean, JSON, text, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.dialects.postgresql import UUID
+
+# Import local modules
+import hruid
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -36,9 +37,9 @@ class JobModel(Base):
     """Database model for gRINN analysis jobs."""
     __tablename__ = "jobs"
     
-    # Primary identification
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    job_name = Column(String(255), nullable=False)
+    # Primary identification - human-readable job ID (e.g., '6-sad-squid-snuggle-softly')
+    id = Column(String(100), primary_key=True, default=lambda: hruid.Generator().random())
+    job_name = Column(String(255), nullable=True)  # Optional user-provided name
     description = Column(Text)
     user_email = Column(String(255))
     is_private = Column(Boolean, default=False, nullable=False)

@@ -8,6 +8,7 @@ import sys
 import docker
 import tempfile
 import shutil
+import zipfile
 from celery import Celery
 from typing import Dict, Any
 import logging
@@ -111,6 +112,28 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                             file_paths[filename] = file_path
                 logger.info(f"Using {len(file_paths)} input files from mock storage at {input_dir}")
             
+            # Extract any ZIP files directly in the input directory (before Docker)
+            logger.info(f"Checking for ZIP files to extract in {input_dir}")
+            zip_files = [f for f in os.listdir(input_dir) if f.lower().endswith('.zip')]
+            
+            for zip_filename in zip_files:
+                zip_path = os.path.join(input_dir, zip_filename)
+                logger.info(f"Extracting ZIP file: {zip_filename}")
+                
+                try:
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        # Extract all files preserving directory structure
+                        zip_ref.extractall(input_dir)
+                        extracted_files = zip_ref.namelist()
+                        logger.info(f"Extracted {len(extracted_files)} files from {zip_filename}:")
+                        for extracted_file in extracted_files:
+                            if not extracted_file.endswith('/'):  # Skip directory entries
+                                logger.info(f"  - {extracted_file}")
+                except zipfile.BadZipFile as e:
+                    logger.error(f"Failed to extract {zip_filename}: not a valid ZIP file - {e}")
+                except Exception as e:
+                    logger.error(f"Failed to extract {zip_filename}: {e}")
+            
             # Analyze downloaded files to determine structure, topology, and trajectory
             input_files = job.input_files or []
             structure_file = None
@@ -198,9 +221,9 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                     target_sel = target_sel.split()
                 docker_command.extend(['--target_sel'] + target_sel)
             
-            # Number of threads (default: 1)
-            if job_params.get('nt'):
-                docker_command.extend(['--nt', str(job_params['nt'])])
+            # Number of threads (default: 4)
+            nt = job_params.get('nt', 4)  # Default to 4 threads
+            docker_command.extend(['--nt', str(nt)])
             
             # GPU acceleration flag
             if job_params.get('use_gpu'):
@@ -228,9 +251,25 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             
             logger.info(f"Docker command: {' '.join(docker_command)}")
             logger.info(f"Mounting host directory {input_dir} to container /input")
-            logger.info(f"Files in {input_dir}: {os.listdir(input_dir) if os.path.exists(input_dir) else 'directory does not exist'}")
             
-            # Run container
+            # List all files and directories in input_dir for debugging
+            if os.path.exists(input_dir):
+                all_items = []
+                for root, dirs, files in os.walk(input_dir):
+                    rel_root = os.path.relpath(root, input_dir)
+                    if rel_root != '.':
+                        all_items.append(f"  DIR: {rel_root}/")
+                    for file in files:
+                        rel_path = os.path.join(rel_root, file) if rel_root != '.' else file
+                        all_items.append(f"  FILE: {rel_path}")
+                logger.info(f"Input directory structure:\n" + "\n".join(all_items))
+            else:
+                logger.error(f"Input directory does not exist: {input_dir}")
+            
+            # Run container in detached mode with a name for log streaming
+            container_name = f"grinn-{job_id}"
+            logger.info(f"Starting container {container_name} with command: {' '.join(docker_command)}")
+            
             container = docker_client.containers.run(
                 grinn_image,
                 command=docker_command,
@@ -238,13 +277,33 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                     input_dir: {'bind': '/input', 'mode': 'ro'},
                     output_dir: {'bind': '/output', 'mode': 'rw'}
                 },
-                remove=True,
-                detach=False,
+                name=container_name,
+                remove=False,  # Don't auto-remove so we can get logs
+                detach=True,   # Run in background
                 stdout=True,
                 stderr=True
             )
             
-            logger.info(f"Container output for job {job_id}: {container.decode()}")
+            logger.info(f"Container {container_name} started, waiting for completion...")
+            
+            # Wait for container to finish and get exit code
+            result = container.wait()
+            exit_code = result.get('StatusCode', -1)
+            
+            # Get container logs (but keep container for a while for log viewing)
+            logs = container.logs(stdout=True, stderr=True).decode('utf-8', errors='replace')
+            logger.info(f"Container output for job {job_id} (exit code: {exit_code}):\n{logs}")
+            
+            # Check if container exited successfully
+            if exit_code != 0:
+                # Keep failed container for debugging
+                logger.error(f"Container {container_name} failed with exit code {exit_code}. Keeping container for log inspection.")
+                raise RuntimeError(f"Container exited with code {exit_code}. Check logs for details.")
+            
+            # For successful jobs, schedule container cleanup after 1 hour
+            # This allows users to view logs while keeping system clean
+            # Note: Container will be removed by Docker's built-in cleanup or manually
+            logger.info(f"Container {container_name} completed successfully. Keeping container for log access (will be cleaned up later).")
             
             # Upload results to storage
             logger.info(f"Uploading results for job {job_id}")

@@ -199,6 +199,10 @@ class CloudStorageManager:
                 
                 # Download file
                 local_path = os.path.join(local_dir, filename)
+                
+                # Create parent directory if filename contains subdirectories
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                
                 blob.download_to_filename(local_path)
                 
                 file_paths[filename] = local_path

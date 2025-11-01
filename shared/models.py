@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Dict, Any
-import uuid
+
+import hruid
 
 class JobStatus(Enum):
     """Job status enumeration."""
@@ -29,6 +30,9 @@ class FileType(Enum):
     TOP = "top"
     ITP = "itp"
     RTP = "rtp"  # Topology description files
+    PRM = "prm"  # Parameter files (CHARMM/AMBER force field parameters)
+    ZIP = "zip"  # Compressed archive (for force field folders)
+    DIR = "dir"  # Force field directory (virtual type for folder uploads)
 
 @dataclass
 class JobFile:
@@ -71,7 +75,7 @@ class JobParameters:
 @dataclass 
 class Job:
     """Represents a gRINN computational job."""
-    job_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    job_id: str = field(default_factory=lambda: hruid.Generator().random())
     status: JobStatus = JobStatus.PENDING
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
