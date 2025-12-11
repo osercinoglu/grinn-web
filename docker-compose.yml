@@ -49,15 +49,13 @@ services:
       - BACKEND_PORT=8050
       - FRONTEND_HOST=0.0.0.0
       - FRONTEND_PORT=8051
-      - DEVELOPMENT_MODE=false
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
-      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
-      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+      - STORAGE_PATH=/data/grinn-jobs
+      - WORKER_REGISTRATION_TOKEN=${WORKER_REGISTRATION_TOKEN}
+      - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
     volumes:
-      - ./secrets:/app/secrets:ro
+      - grinn_storage:/data/grinn-jobs
       - webapp_logs:/app/logs
-      - webapp_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,14 +81,13 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
-      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
-      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+      - STORAGE_PATH=/data/grinn-jobs
+      - WORKER_REGISTRATION_TOKEN=${WORKER_REGISTRATION_TOKEN}
+      - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./secrets:/app/secrets:ro
+      - grinn_storage:/data/grinn-jobs
       - worker_logs:/app/logs
-      - worker_results:/app/results
       - grinn_shared:/shared  # Shared volume with gRINN dashboard
     depends_on:
       postgres:
@@ -140,7 +137,7 @@ volumes:
   webapp_logs:
   webapp_uploads:
   worker_logs:
-  worker_results:
+  grinn_storage:
   grinn_shared:
 
 networks:

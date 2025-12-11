@@ -7,13 +7,14 @@ This script runs a Celery worker that connects to a remote gRINN frontend
 and processes computational jobs using Docker containers.
 
 Usage:
-    python standalone-worker.py --frontend-host your.frontend.ip --facility facility-1
+    python standalone-worker.py --frontend-host your.frontend.ip --facility facility-1 --registration-token YOUR_TOKEN
 
 Requirements:
     - Docker installed and running
     - gRINN Docker image available
     - Network access to frontend Redis and database
-    - GCS credentials (if using Google Cloud Storage)
+    - NFS mount for shared storage (or local storage if single-node)
+    - Valid registration token for worker authentication
 """
 
 import os
@@ -22,6 +23,8 @@ import argparse
 import logging
 import signal
 import time
+import threading
+import requests
 from pathlib import Path
 
 # Add shared modules to path
@@ -94,6 +97,22 @@ def validate_environment(args):
         logger.error(f"❌ Database connection test failed: {e}")
         return False
     
+    # Check storage path (NFS mount or local)
+    storage_path = args.storage_path
+    if os.path.exists(storage_path):
+        if os.access(storage_path, os.W_OK):
+            logger.info(f"✅ Storage path writable: {storage_path}")
+        else:
+            logger.error(f"❌ Storage path not writable: {storage_path}")
+            return False
+    else:
+        try:
+            os.makedirs(storage_path, exist_ok=True)
+            logger.info(f"✅ Storage path created: {storage_path}")
+        except Exception as e:
+            logger.error(f"❌ Cannot create storage path: {e}")
+            return False
+    
     return True
 
 def setup_environment(args):
@@ -112,30 +131,121 @@ def setup_environment(args):
     
     # Worker identification
     os.environ['WORKER_FACILITY'] = args.facility
-    os.environ['WORKER_ID'] = f"{args.facility}-{os.getpid()}"
+    worker_id = f"{args.facility}-{os.getpid()}"
+    os.environ['WORKER_ID'] = worker_id
     
     # gRINN configuration
     os.environ['GRINN_DOCKER_IMAGE'] = args.grinn_image
     os.environ['DOCKER_TIMEOUT'] = str(args.timeout)
     
-    # Storage configuration
-    if args.development:
-        os.environ['DEVELOPMENT_MODE'] = 'true'
-    else:
-        os.environ['DEVELOPMENT_MODE'] = 'false'
-        os.environ['GCS_BUCKET_NAME'] = args.gcs_bucket or os.getenv('GCS_BUCKET_NAME', '')
-        os.environ['GCS_PROJECT_ID'] = args.gcs_project or os.getenv('GCS_PROJECT_ID', '')
-        
-        # GCS credentials
-        gcs_creds = args.gcs_credentials or 'secrets/gcs-credentials.json'
-        if os.path.exists(gcs_creds):
-            os.environ['GCS_CREDENTIALS_PATH'] = os.path.abspath(gcs_creds)
-        else:
-            logging.warning(f"⚠️  GCS credentials not found at {gcs_creds}")
+    # Local storage configuration (NFS mount point)
+    os.environ['STORAGE_PATH'] = args.storage_path
+    
+    # Worker registration token
+    if args.registration_token:
+        os.environ['WORKER_REGISTRATION_TOKEN'] = args.registration_token
+    
+    return worker_id
 
-def run_worker(args):
-    """Run the Celery worker."""
+
+def register_worker(args, worker_id):
+    """Register this worker with the frontend."""
     logger = logging.getLogger(__name__)
+    
+    if not args.registration_token:
+        logger.warning("⚠️  No registration token provided, skipping worker registration")
+        return True
+    
+    try:
+        import platform
+        import docker
+        
+        # Gather worker capabilities
+        docker_client = docker.from_env()
+        docker_info = docker_client.info()
+        
+        capabilities = {
+            'cpu_cores': os.cpu_count(),
+            'docker_cpus': docker_info.get('NCPU', 0),
+            'docker_memory_gb': round(docker_info.get('MemTotal', 0) / (1024**3), 2),
+        }
+        
+        metadata = {
+            'hostname': platform.node(),
+            'platform': platform.platform(),
+            'python_version': platform.python_version(),
+            'grinn_image': args.grinn_image,
+        }
+        
+        # Register with frontend
+        register_url = f"http://{args.frontend_host}:{args.backend_port}/api/workers/register"
+        response = requests.post(
+            register_url,
+            json={
+                'token': args.registration_token,
+                'worker_id': worker_id,
+                'facility': args.facility,
+                'capabilities': capabilities,
+                'metadata': metadata
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            logger.info(f"✅ Worker registered: {worker_id}")
+            return True
+        elif response.status_code == 401:
+            logger.error("❌ Invalid registration token")
+            return False
+        else:
+            error_msg = response.json().get('error', 'Unknown error')
+            logger.error(f"❌ Registration failed: {error_msg}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Registration error: {e}")
+        return False
+
+
+def heartbeat_loop(args, worker_id, stop_event):
+    """Background thread to send periodic heartbeats."""
+    logger = logging.getLogger(__name__)
+    
+    heartbeat_url = f"http://{args.frontend_host}:{args.backend_port}/api/workers/heartbeat"
+    
+    while not stop_event.is_set():
+        try:
+            response = requests.post(
+                heartbeat_url,
+                json={
+                    'worker_id': worker_id,
+                    'status': 'active'
+                },
+                timeout=5
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"Heartbeat failed: {response.status_code}")
+                
+        except Exception as e:
+            logger.debug(f"Heartbeat error: {e}")
+        
+        # Wait for next heartbeat (every 60 seconds)
+        stop_event.wait(60)
+
+
+def run_worker(args, worker_id):
+    """Run the Celery worker with heartbeat."""
+    logger = logging.getLogger(__name__)
+    
+    # Start heartbeat thread
+    stop_event = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=heartbeat_loop,
+        args=(args, worker_id, stop_event),
+        daemon=True
+    )
+    heartbeat_thread.start()
     
     try:
         # Import Celery tasks
@@ -144,12 +254,13 @@ def run_worker(args):
         
         logger.info(f"🚀 Starting gRINN worker for facility: {args.facility}")
         logger.info(f"📡 Connected to frontend: {args.frontend_host}")
+        logger.info(f"📁 Storage path: {args.storage_path}")
         
         # Run worker
         celery_app.worker_main([
             'worker',
             '--loglevel=info',
-            '--concurrency=2',
+            f'--concurrency={args.concurrency}',
             f'--hostname={args.facility}-worker@%h'
         ])
         
@@ -158,8 +269,12 @@ def run_worker(args):
     except Exception as e:
         logger.error(f"❌ Worker error: {e}")
         return 1
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(timeout=5)
     
     return 0
+
 
 def main():
     parser = argparse.ArgumentParser(description='Standalone gRINN Worker')
@@ -167,26 +282,30 @@ def main():
                        help='Frontend server hostname or IP')
     parser.add_argument('--facility', default='remote-facility',
                        help='Facility identifier for this worker')
+    parser.add_argument('--registration-token',
+                       help='Token for worker registration (or set WORKER_REGISTRATION_TOKEN env var)')
+    parser.add_argument('--storage-path', default='/data/grinn-jobs',
+                       help='Path to shared storage (NFS mount point)')
     parser.add_argument('--db-password',
                        help='Database password (or set POSTGRES_PASSWORD env var)')
     parser.add_argument('--redis-password', 
                        help='Redis password (or set REDIS_PASSWORD env var)')
+    parser.add_argument('--backend-port', type=int, default=8050,
+                       help='Backend API port (default: 8050)')
     parser.add_argument('--grinn-image', default='grinn:latest',
                        help='gRINN Docker image name')
     parser.add_argument('--timeout', type=int, default=7200,
                        help='Job timeout in seconds (default: 2 hours)')
-    parser.add_argument('--development', action='store_true',
-                       help='Run in development mode (mock storage)')
-    parser.add_argument('--gcs-bucket',
-                       help='Google Cloud Storage bucket name')
-    parser.add_argument('--gcs-project',
-                       help='Google Cloud Storage project ID')
-    parser.add_argument('--gcs-credentials', default='secrets/gcs-credentials.json',
-                       help='Path to GCS credentials JSON file')
+    parser.add_argument('--concurrency', type=int, default=2,
+                       help='Number of concurrent jobs (default: 2)')
     parser.add_argument('--verbose', action='store_true',
                        help='Enable debug logging')
     
     args = parser.parse_args()
+    
+    # Get registration token from env if not provided
+    if not args.registration_token:
+        args.registration_token = os.getenv('WORKER_REGISTRATION_TOKEN')
     
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
@@ -201,10 +320,16 @@ def main():
         return 1
     
     # Setup environment
-    setup_environment(args)
+    worker_id = setup_environment(args)
+    
+    # Register worker
+    if args.registration_token:
+        if not register_worker(args, worker_id):
+            logger.error("❌ Worker registration failed")
+            return 1
     
     # Run worker
-    return run_worker(args)
+    return run_worker(args, worker_id)
 
 if __name__ == '__main__':
     sys.exit(main())

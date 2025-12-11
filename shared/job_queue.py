@@ -278,8 +278,7 @@ class JobQueue:
                     self.redis_client.delete(job_key)
                     self.redis_client.srem(self.job_list_key, job_id)
                     
-                    # TODO: Clean up GCS files
-                    # get_storage_manager().delete_job_files(job_id)
+                    # Note: File cleanup is handled by cleanup_old_job_files task in tasks.py
                     
                     cleaned_count += 1
                     logger.debug(f"Cleaned up old job {job_id}")

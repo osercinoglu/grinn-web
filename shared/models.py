@@ -40,7 +40,7 @@ class JobFile:
     filename: str
     file_type: FileType
     size_bytes: int
-    gcs_path: Optional[str] = None
+    storage_path: Optional[str] = None  # Path to file in local storage
     upload_timestamp: Optional[datetime] = None
     
     def __post_init__(self):
@@ -99,7 +99,7 @@ class Job:
     worker_id: Optional[str] = None
     
     # Results
-    results_gcs_path: Optional[str] = None
+    results_path: Optional[str] = None  # Path to results in local storage
     error_message: Optional[str] = None
     error_details: Optional[Dict[str, Any]] = None
     
@@ -168,14 +168,14 @@ class Job:
                     "filename": f.filename,
                     "file_type": f.file_type.value,
                     "size_bytes": f.size_bytes,
-                    "gcs_path": f.gcs_path,
+                    "storage_path": f.storage_path,
                     "upload_timestamp": f.upload_timestamp.isoformat() if f.upload_timestamp else None
                 } for f in self.input_files
             ],
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "worker_id": self.worker_id,
-            "results_gcs_path": self.results_gcs_path,
+            "results_path": self.results_path,
             "error_message": self.error_message,
             "error_details": self.error_details,
             "progress_percentage": self.progress_percentage,
@@ -203,7 +203,7 @@ class Job:
                 filename=file_data["filename"],
                 file_type=FileType(file_data["file_type"]),
                 size_bytes=file_data["size_bytes"],
-                gcs_path=file_data.get("gcs_path")
+                storage_path=file_data.get("storage_path") or file_data.get("gcs_path")  # Backward compat
             )
             if file_data.get("upload_timestamp"):
                 job_file.upload_timestamp = datetime.fromisoformat(file_data["upload_timestamp"])
@@ -216,7 +216,7 @@ class Job:
             job.completed_at = datetime.fromisoformat(data["completed_at"])
         
         job.worker_id = data.get("worker_id")
-        job.results_gcs_path = data.get("results_gcs_path")
+        job.results_path = data.get("results_path") or data.get("results_gcs_path")  # Backward compat
         job.error_message = data.get("error_message")
         job.error_details = data.get("error_details")
         job.progress_percentage = data.get("progress_percentage", 0.0)

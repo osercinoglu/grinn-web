@@ -9,10 +9,11 @@ A comprehensive and interactive web interface for the gRINN (get Residue iNterac
 - 🧬 **Automatic Topology Generation** - Force field-based topology for ensemble mode
 - 📊 **Real-time Monitoring** - Track job progress with dedicated monitoring pages  
 - 🔒 **Privacy Controls** - Option to hide job details from public queue
-- 💾 **Persistent Storage** - Jobs and results saved with full history
+- 💾 **Local Storage** - Jobs and results saved to local filesystem (NFS for multi-worker)
 - 🐳 **Docker Integration** - Containerized gRINN processing with scaling support
 - 🌐 **Web Dashboard** - Interactive interface for job management
 - 🏢 **Distributed Architecture** - Frontend and workers can run at different facilities
+- 🔐 **Token-Based Worker Auth** - Secure worker registration with authentication tokens
 
 ## Overview
 
@@ -124,14 +125,25 @@ Frontend Server (Public)          Remote Facility Workers
    nano .env.frontend
    ```
 
-3. **Setup credentials (Production only):**
+3. **Setup storage directory:**
    ```bash
-   mkdir -p secrets
-   # Add your GCS credentials
-   cp /path/to/your/gcs-credentials.json secrets/
+   # Create storage directory
+   mkdir -p /data/grinn-jobs
+   
+   # For multi-worker setup, this should be on NFS
+   # See NFS Setup section below
    ```
 
-4. **Deploy frontend:**
+4. **Generate worker registration token (for multi-worker setups):**
+   ```bash
+   # Generate secure token
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   
+   # Add to .env.frontend
+   echo "WORKER_REGISTRATION_TOKEN=your-token" >> .env.frontend
+   ```
+
+5. **Deploy frontend:**
    ```bash
    # Make deployment script executable
    chmod +x deploy-frontend.sh
@@ -140,7 +152,7 @@ Frontend Server (Public)          Remote Facility Workers
    ./deploy-frontend.sh
    ```
 
-5. **Verify deployment:**
+6. **Verify deployment:**
    ```bash
    # Check service health
    docker-compose -f docker-compose.frontend.yml ps
@@ -153,7 +165,20 @@ Frontend Server (Public)          Remote Facility Workers
 
 Deploy at each computational facility:
 
-1. **Setup worker environment:**
+1. **Generate worker registration token (on frontend server):**
+   ```bash
+   # Generate a secure token
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   
+   # Add to frontend .env file
+   echo "WORKER_REGISTRATION_TOKEN=your-generated-token" >> .env
+   ```
+
+2. **Setup NFS for shared storage (required for multi-worker):**
+   
+   See the [NFS Setup Guide](#-nfs-setup-for-multi-worker-deployments) section below.
+
+3. **Setup worker environment:**
    ```bash
    # Clone repository at worker facility
    git clone https://github.com/osercinoglu/grinn-web.git
@@ -166,15 +191,16 @@ Deploy at each computational facility:
    nano .env.worker
    ```
 
-2. **Configure worker connection:**
+4. **Configure worker connection:**
    ```bash
    # In .env.worker, set:
    FRONTEND_HOST=your.frontend.server.ip
-   FACILITY_NAME=facility-1
-   WORKER_COUNT=2
+   WORKER_FACILITY=facility-1
+   WORKER_REGISTRATION_TOKEN=your-token-from-frontend
+   NFS_STORAGE_PATH=/mnt/grinn-storage  # NFS mount point
    ```
 
-3. **Deploy workers:**
+5. **Deploy workers:**
    ```bash
    # Make deployment script executable  
    chmod +x deploy-worker.sh
@@ -183,7 +209,7 @@ Deploy at each computational facility:
    ./deploy-worker.sh
    ```
 
-4. **Verify worker connection:**
+6. **Verify worker connection:**
    ```bash
    # Check worker health
    docker-compose -f docker-compose.worker.yml ps
@@ -201,9 +227,169 @@ For maximum flexibility, use the standalone worker script:
 python standalone-worker.py \
     --frontend-host your.frontend.server.ip \
     --facility facility-1 \
-    --gcs-bucket your-bucket-name \
-    --gcs-project your-project-id
+    --registration-token your-token \
+    --storage-path /mnt/grinn-storage \
+    --concurrency 2
 ```
+
+**Available options:**
+- `--frontend-host` (required): Frontend server IP/hostname
+- `--facility`: Worker facility name (default: remote-facility)
+- `--registration-token`: Token for worker authentication
+- `--storage-path`: Path to shared storage/NFS mount (default: /data/grinn-jobs)
+- `--concurrency`: Number of concurrent jobs (default: 2)
+- `--grinn-image`: gRINN Docker image name (default: grinn:latest)
+- `--timeout`: Job timeout in seconds (default: 7200)
+
+---
+
+## 📁 NFS Setup for Multi-Worker Deployments
+
+For multi-worker deployments, you need a shared filesystem accessible from all nodes. NFS (Network File System) is recommended for its simplicity and compatibility.
+
+### NFS Server Setup (Frontend Server)
+
+1. **Install NFS server:**
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update
+   sudo apt install nfs-kernel-server
+   
+   # CentOS/RHEL
+   sudo yum install nfs-utils
+   ```
+
+2. **Create and configure the shared directory:**
+   ```bash
+   # Create storage directory
+   sudo mkdir -p /data/grinn-jobs
+   
+   # Set ownership (use the UID/GID that will run the containers)
+   sudo chown -R 1000:1000 /data/grinn-jobs
+   
+   # Set permissions
+   sudo chmod -R 755 /data/grinn-jobs
+   ```
+
+3. **Configure NFS exports:**
+   ```bash
+   # Edit exports file
+   sudo nano /etc/exports
+   
+   # Add the following line (adjust network range as needed):
+   /data/grinn-jobs    10.0.0.0/8(rw,sync,no_subtree_check,no_root_squash)
+   
+   # For a specific worker IP:
+   /data/grinn-jobs    192.168.1.100(rw,sync,no_subtree_check,no_root_squash)
+   
+   # For multiple workers:
+   /data/grinn-jobs    192.168.1.100(rw,sync,no_subtree_check,no_root_squash) 192.168.1.101(rw,sync,no_subtree_check,no_root_squash)
+   ```
+
+4. **Apply configuration and start service:**
+   ```bash
+   # Export the filesystem
+   sudo exportfs -ra
+   
+   # Start and enable NFS server
+   sudo systemctl enable nfs-server
+   sudo systemctl start nfs-server
+   
+   # Verify exports
+   sudo exportfs -v
+   ```
+
+5. **Configure firewall:**
+   ```bash
+   # Allow NFS through firewall (Ubuntu)
+   sudo ufw allow from 10.0.0.0/8 to any port nfs
+   
+   # Or allow specific ports
+   sudo ufw allow 2049/tcp    # NFS
+   sudo ufw allow 111/tcp     # RPC
+   sudo ufw allow 111/udp
+   ```
+
+### NFS Client Setup (Worker Nodes)
+
+1. **Install NFS client:**
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update
+   sudo apt install nfs-common
+   
+   # CentOS/RHEL
+   sudo yum install nfs-utils
+   ```
+
+2. **Create mount point:**
+   ```bash
+   sudo mkdir -p /mnt/grinn-storage
+   ```
+
+3. **Test mount:**
+   ```bash
+   # Replace <frontend-ip> with your frontend server's IP
+   sudo mount -t nfs <frontend-ip>:/data/grinn-jobs /mnt/grinn-storage
+   
+   # Verify mount
+   df -h | grep grinn
+   touch /mnt/grinn-storage/test-file && rm /mnt/grinn-storage/test-file
+   ```
+
+4. **Configure permanent mount:**
+   ```bash
+   # Edit fstab for automatic mounting
+   sudo nano /etc/fstab
+   
+   # Add the following line:
+   <frontend-ip>:/data/grinn-jobs  /mnt/grinn-storage  nfs  defaults,_netdev,rw  0  0
+   
+   # Test fstab entry
+   sudo mount -a
+   ```
+
+5. **Update worker configuration:**
+   ```bash
+   # In .env.worker or when running standalone-worker.py:
+   NFS_STORAGE_PATH=/mnt/grinn-storage
+   
+   # Or via command line:
+   python standalone-worker.py \
+       --storage-path /mnt/grinn-storage \
+       --frontend-host <frontend-ip> \
+       --registration-token <your-token>
+   ```
+
+### Verifying NFS Setup
+
+```bash
+# On frontend server - check active mounts
+showmount -e localhost
+
+# On worker node - verify connection
+showmount -e <frontend-ip>
+
+# Test file creation from worker
+echo "test" > /mnt/grinn-storage/worker-test.txt
+
+# Verify on frontend
+cat /data/grinn-jobs/worker-test.txt
+
+# Cleanup
+rm /data/grinn-jobs/worker-test.txt
+```
+
+### Alternative: Shared Storage Options
+
+If NFS doesn't fit your needs, consider these alternatives:
+
+- **GlusterFS**: Distributed filesystem for high availability
+- **CephFS**: Highly scalable distributed storage
+- **SSHFS**: Mount over SSH (simpler but slower)
+- **Cloud Storage**: Mount S3/Azure Blob as filesystem using s3fs-fuse or similar
+
+---
 
 ### Network Requirements
 
@@ -249,6 +435,59 @@ docker-compose -f docker-compose.worker.yml logs -f worker
 docker-compose -f docker-compose.frontend.yml exec redis redis-cli
 > INFO
 > LLEN grinn_tasks  # Check queue length
+```
+
+### Worker Management
+
+**View registered workers via API:**
+```bash
+# List all active workers
+curl http://localhost:5000/api/workers
+
+# Response format:
+# {
+#   "workers": [
+#     {
+#       "id": "worker-abc123",
+#       "facility": "main-hpc",
+#       "last_heartbeat": "2024-01-15T10:30:00Z",
+#       "status": "active"
+#     }
+#   ]
+# }
+```
+
+**Deregister a worker:**
+```bash
+# Remove a worker by ID
+curl -X DELETE http://localhost:5000/api/workers/<worker-id>
+```
+
+### Job File Cleanup
+
+The system automatically cleans up old job files based on the `JOB_FILE_RETENTION_HOURS` setting:
+
+**Configuration:**
+```bash
+# In .env - set job file retention (hours)
+JOB_FILE_RETENTION_HOURS=72   # Default: 72 hours (3 days)
+JOB_FILE_RETENTION_HOURS=168  # Keep for 1 week
+JOB_FILE_RETENTION_HOURS=720  # Keep for 30 days
+```
+
+**How it works:**
+- A Celery beat task runs every 6 hours
+- Job folders older than `JOB_FILE_RETENTION_HOURS` are deleted
+- Both input and output files are removed
+- Database records are preserved (only files are cleaned up)
+
+**Manual cleanup:**
+```bash
+# Force cleanup from Celery shell
+docker-compose exec webapp celery -A backend.tasks call backend.tasks.cleanup_old_job_files
+
+# Or run cleanup directly
+python -c "from backend.tasks import cleanup_old_job_files; cleanup_old_job_files()"
 ```
 
 ---
@@ -311,15 +550,11 @@ For traditional single-machine deployment:
 
 For production deployment, configure:
 
-1. **Google Cloud Storage (Recommended):**
+1. **Storage path:**
    ```bash
-   # Add your GCS credentials
-   cp /path/to/your/service-account.json secrets/gcs-credentials.json
-   
-   # Update .env with your GCS settings:
-   GCS_BUCKET_NAME=your-bucket-name
-   GCS_PROJECT_ID=your-project-id
-   DEVELOPMENT_MODE=false
+   # Update .env with your storage settings:
+   STORAGE_PATH=/data/grinn-jobs  # Local storage path for job files
+   JOB_FILE_RETENTION_HOURS=72    # Job files deleted after this time
    ```
 
 2. **Security settings:**
@@ -327,6 +562,10 @@ For production deployment, configure:
    # Generate strong passwords in .env
    POSTGRES_PASSWORD=your-secure-password
    REDIS_PASSWORD=your-redis-password
+   
+   # Generate worker registration token
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   WORKER_REGISTRATION_TOKEN=your-generated-token
    ```
 
 3. **Resource limits:**
@@ -383,8 +622,7 @@ For local development without Docker:
 
 3. **Set up development configuration in .env:**
    ```bash
-   # Development mode (uses mock storage, SQLite)
-   DEVELOPMENT_MODE=true
+   # Database settings
    DATABASE_URL=sqlite:////tmp/grinn_dev.db
    
    # Backend API settings
@@ -395,9 +633,9 @@ For local development without Docker:
    FRONTEND_HOST=0.0.0.0
    FRONTEND_PORT=8051
    
-   # Mock GCS settings (for development)
-   GCS_BUCKET_NAME=mock-bucket
-   GCS_PROJECT_ID=mock-project
+   # Storage settings
+   STORAGE_PATH=/tmp/grinn-jobs
+   JOB_FILE_RETENTION_HOURS=24
    
    # Security
    SECRET_KEY=development-secret-key
@@ -442,9 +680,8 @@ For local development without Docker:
 ### Development Features
 
 - **Hot reloading** - Code changes reload automatically  
-- **Mock storage** - No GCS credentials required
+- **Local storage** - Files stored on local filesystem
 - **SQLite database** - No PostgreSQL setup needed
-- **Development mode** - Simplified configuration
 - **Debug logging** - Detailed error information
 - **No Docker required** - Pure Python environment
 
@@ -453,10 +690,10 @@ For local development without Docker:
 **If backend fails to start:**
 ```bash
 # Check environment variables
-env | grep -E "(FRONTEND_PORT|BACKEND_PORT)"
+env | grep -E "(FRONTEND_PORT|BACKEND_PORT|STORAGE_PATH)"
 
 # Start with explicit variables
-DEVELOPMENT_MODE=true FRONTEND_PORT=8051 BACKEND_PORT=5000 python backend/api.py
+DEBUG=true FRONTEND_PORT=8051 BACKEND_PORT=5000 python backend/api.py
 ```
 
 **If frontend can't connect to backend:**
@@ -638,10 +875,13 @@ docker-compose up -d
 **File upload issues:**
 ```bash
 # Check storage configuration in .env
-cat .env | grep -E "(GCS|DEVELOPMENT)"
+cat .env | grep -E "(STORAGE_PATH|JOB_FILE_RETENTION)"
 
-# Check mounted volumes
-docker-compose exec webapp ls -la /app/uploads/
+# Check mounted volumes and storage path
+docker-compose exec webapp ls -la /data/grinn-jobs/
+
+# Check storage permissions
+ls -la /data/grinn-jobs/
 ```
 
 **Worker connection issues (Distributed mode):**
@@ -649,9 +889,13 @@ docker-compose exec webapp ls -la /app/uploads/
 # Test network connectivity from worker facility
 nc -zv <frontend-host> 5432  # PostgreSQL
 nc -zv <frontend-host> 6379  # Redis
+nc -zv <frontend-host> 5000  # Backend API
 
 # Check firewall settings on frontend server
 sudo ufw status
+
+# Verify worker registration token
+cat .env | grep WORKER_REGISTRATION_TOKEN
 ```
 
 ### Distributed Deployment Debugging

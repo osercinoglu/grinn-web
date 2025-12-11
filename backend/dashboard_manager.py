@@ -269,9 +269,19 @@ class DashboardManager:
         
         # Check if dashboard is ready (if not already marked as ready)
         if not info.get('ready', False):
-            if self._is_dashboard_ready(info['port']):
-                info['ready'] = True
-                logger.info(f"Dashboard for job {job_id} is now ready at port {info['port']}")
+            # Add minimum delay before checking readiness
+            # Dashboard containers need time to initialize Python, load libraries, process data
+            started_at = datetime.fromisoformat(info['started_at'])
+            elapsed = (datetime.utcnow() - started_at).total_seconds()
+            
+            # Only check readiness if at least 3 seconds have passed
+            # This prevents false positives from port being open before app is ready
+            if elapsed >= 3:
+                if self._is_dashboard_ready(info['port']):
+                    info['ready'] = True
+                    logger.info(f"Dashboard for job {job_id} is now ready at port {info['port']} (after {elapsed:.1f}s)")
+            else:
+                logger.debug(f"Dashboard for job {job_id} still initializing ({elapsed:.1f}s elapsed, need 3s minimum)")
         
         return {
             'running': True,
@@ -322,15 +332,31 @@ class DashboardManager:
             return False
     
     def _is_dashboard_ready(self, port: int) -> bool:
-        """Check if dashboard is ready to serve requests."""
-        import socket
+        """Check if dashboard is ready to serve requests with HTTP health check."""
+        import requests
         try:
-            # Try to connect to the dashboard port on localhost (127.0.0.1)
-            # This checks if the container port is accessible from the host
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                result = sock.connect_ex(('127.0.0.1', port))
-                return result == 0
+            # Make an HTTP request to the dashboard to verify it's actually serving content
+            # Not just checking if port is open, but if Dash app is ready
+            url = f"http://127.0.0.1:{port}/"
+            response = requests.get(url, timeout=2)
+            
+            # Dashboard is ready if we get any successful response (200-299)
+            # Even a 404 means the app is running, just need 200 for the main page
+            if response.status_code == 200:
+                logger.debug(f"Dashboard readiness check passed for port {port}")
+                return True
+            else:
+                logger.debug(f"Dashboard at port {port} returned status {response.status_code}")
+                return False
+                
+        except requests.exceptions.ConnectionError as e:
+            # Connection refused or failed - port not ready yet
+            logger.debug(f"Dashboard readiness check failed for port {port}: Connection failed")
+            return False
+        except requests.exceptions.Timeout as e:
+            # Request timed out - dashboard not responding yet
+            logger.debug(f"Dashboard readiness check failed for port {port}: Timeout")
+            return False
         except Exception as e:
             logger.debug(f"Dashboard readiness check failed for port {port}: {e}")
             return False
@@ -338,13 +364,14 @@ class DashboardManager:
     def _get_job_output_dir(self, job_id: str) -> Optional[str]:
         """Get the output directory for a job."""
         # This depends on the storage implementation
-        if hasattr(self.storage, 'base_dir'):
-            # MockStorageManager
+        if hasattr(self.storage, 'get_output_directory'):
+            # LocalStorageManager
+            return self.storage.get_output_directory(job_id)
+        elif hasattr(self.storage, 'base_dir'):
+            # Legacy fallback
             return os.path.join(self.storage.base_dir, job_id, 'output')
         else:
-            # CloudStorageManager - would need to download results first
-            # For now, return None - cloud storage needs different handling
-            logger.warning(f"Cloud storage not supported for dashboard yet (job {job_id})")
+            logger.warning(f"Unknown storage type for job {job_id}")
             return None
     
     def get_dashboard_logs(self, job_id: str, since_timestamp: Optional[str] = None) -> Dict[str, any]:

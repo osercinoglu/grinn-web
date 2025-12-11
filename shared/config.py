@@ -36,10 +36,14 @@ class Config:
     celery_broker_url: str = None
     celery_result_backend: str = None
     
-    # Google Cloud Storage settings
-    gcs_bucket_name: str = None
-    gcs_credentials_path: str = None
-    gcs_project_id: str = None
+    # Local storage settings (use NFS mount for multi-worker setups)
+    storage_path: str = None  # Will default to ~/.grinn-jobs or /data/grinn-jobs
+    
+    # Worker registration settings
+    worker_registration_token: str = None
+    
+    # Job file cleanup settings
+    job_file_retention_hours: int = 72  # 3 days default
     
     # gRINN Docker settings
     grinn_docker_image: str = "grinn:latest"
@@ -57,6 +61,15 @@ class Config:
     # Security settings
     secret_key: str = None
     upload_folder: str = "/tmp/grinn-uploads"
+    
+    def _get_default_storage_path(self) -> str:
+        """Get default storage path based on environment."""
+        # Check if /data/grinn-jobs exists and is writable (production Docker)
+        if os.path.exists("/data") and os.access("/data", os.W_OK):
+            return "/data/grinn-jobs"
+        # Otherwise use user home directory (development)
+        home = os.path.expanduser("~")
+        return os.path.join(home, ".grinn-jobs")
     
     def __post_init__(self):
         """Load configuration from environment variables."""
@@ -102,10 +115,18 @@ class Config:
         else:
             self.celery_result_backend = os.getenv("CELERY_RESULT_BACKEND", self.celery_result_backend)
         
-        # Google Cloud Storage
-        self.gcs_bucket_name = os.getenv("GCS_BUCKET_NAME", self.gcs_bucket_name)
-        self.gcs_credentials_path = os.getenv("GCS_CREDENTIALS_PATH", self.gcs_credentials_path)
-        self.gcs_project_id = os.getenv("GCS_PROJECT_ID", self.gcs_project_id)
+        # Local storage - use environment variable or smart default
+        env_storage_path = os.getenv("STORAGE_PATH")
+        if env_storage_path:
+            self.storage_path = env_storage_path
+        elif self.storage_path is None:
+            self.storage_path = self._get_default_storage_path()
+        
+        # Worker registration
+        self.worker_registration_token = os.getenv("WORKER_REGISTRATION_TOKEN", self.worker_registration_token)
+        
+        # Job file cleanup
+        self.job_file_retention_hours = int(os.getenv("JOB_FILE_RETENTION_HOURS", self.job_file_retention_hours))
         
         # gRINN Docker
         self.grinn_docker_image = os.getenv("GRINN_DOCKER_IMAGE", self.grinn_docker_image)
@@ -130,21 +151,26 @@ class Config:
         
         # Create upload folder if it doesn't exist
         os.makedirs(self.upload_folder, exist_ok=True)
+        
+        # Create storage directory if it doesn't exist
+        os.makedirs(self.storage_path, exist_ok=True)
     
-    def validate(self, skip_gcs_validation=False):
+    def validate(self):
         """Validate configuration and raise errors for missing required settings."""
         errors = []
         
-        # Skip GCS validation in development mode
-        if not skip_gcs_validation:
-            if not self.gcs_bucket_name:
-                errors.append("GCS_BUCKET_NAME is required")
-            
-            if not self.gcs_project_id:
-                errors.append("GCS_PROJECT_ID is required")
-            
-            if not self.gcs_credentials_path or not os.path.exists(self.gcs_credentials_path):
-                errors.append("GCS_CREDENTIALS_PATH must point to a valid credentials file")
+        # Validate storage path exists and is writable
+        if not os.path.exists(self.storage_path):
+            try:
+                os.makedirs(self.storage_path, exist_ok=True)
+            except Exception as e:
+                errors.append(f"STORAGE_PATH '{self.storage_path}' cannot be created: {e}")
+        elif not os.access(self.storage_path, os.W_OK):
+            errors.append(f"STORAGE_PATH '{self.storage_path}' is not writable")
+        
+        # Validate retention hours
+        if self.job_file_retention_hours < 1:
+            errors.append("JOB_FILE_RETENTION_HOURS must be at least 1")
         
         if errors:
             raise ValueError(f"Configuration errors: {', '.join(errors)}")
@@ -153,6 +179,15 @@ class Config:
     def redis_url(self) -> str:
         """Get Redis URL for connections."""
         return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+    
+    @property
+    def backend_url(self) -> str:
+        """Get backend URL for client connections (resolves 0.0.0.0 to localhost)."""
+        host = self.backend_host
+        # Replace 0.0.0.0 with localhost for client connections
+        if host == "0.0.0.0":
+            host = "localhost"
+        return f"http://{host}:{self.backend_port}"
 
 
 # Global configuration instance

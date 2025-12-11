@@ -13,23 +13,18 @@ if [ ! -f ".env.frontend" ]; then
     exit 1
 fi
 
-# Check if GCS credentials exist
-if [ ! -f "secrets/gcs-credentials.json" ]; then
-    echo "❌ Error: GCS credentials not found!"
-    echo "📝 Please place your GCS service account JSON at secrets/gcs-credentials.json"
-    exit 1
-fi
-
-# Create secrets directory if it doesn't exist
-mkdir -p secrets
+# Create storage directory if it doesn't exist
+STORAGE_PATH="${STORAGE_PATH:-/data/grinn-jobs}"
+mkdir -p "$STORAGE_PATH"
+echo "✅ Storage directory ready: $STORAGE_PATH"
 
 # Load environment variables
 source .env.frontend
 
 echo "📋 Frontend Configuration:"
-echo "   - GCS Bucket: ${GCS_BUCKET_NAME}"
-echo "   - GCS Project: ${GCS_PROJECT_ID}"
+echo "   - Storage Path: ${STORAGE_PATH:-/data/grinn-jobs}"
 echo "   - Frontend IP: ${FRONTEND_PUBLIC_IP}"
+echo "   - Job Retention: ${JOB_FILE_RETENTION_HOURS:-72} hours"
 
 # Build images if they don't exist
 echo "🔨 Building frontend images..."

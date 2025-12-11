@@ -60,7 +60,7 @@ class JobModel(Base):
     
     # File information
     input_files = Column(JSON)  # List of uploaded files metadata
-    results_gcs_path = Column(String(500))  # GCS path to results
+    results_gcs_path = Column(String(500))  # Path to results (legacy field name)
     
     # Worker information
     worker_id = Column(String(100))  # Celery task ID
@@ -88,7 +88,8 @@ class JobModel(Base):
             'error_message': self.error_message,
             'parameters': self.parameters,
             'input_files': self.input_files,
-            'results_gcs_path': self.results_gcs_path,
+            'results_path': self.results_gcs_path,  # New name, legacy column
+            'results_gcs_path': self.results_gcs_path,  # Keep for backward compatibility
             'worker_id': self.worker_id,
             'worker_host': self.worker_host,
             'processing_time_seconds': self.processing_time_seconds,
@@ -227,14 +228,14 @@ class DatabaseManager:
             session.commit()
             return True
     
-    def set_job_results(self, job_id: str, results_gcs_path: str) -> bool:
-        """Set job results path."""
+    def set_job_results(self, job_id: str, results_path: str) -> bool:
+        """Set job results path (stored in results_gcs_path field for compatibility)."""
         with self.get_session() as session:
             job = session.query(JobModel).filter(JobModel.id == job_id).first()
             if not job:
                 return False
             
-            job.results_gcs_path = results_gcs_path
+            job.results_gcs_path = results_path
             session.commit()
             return True
     

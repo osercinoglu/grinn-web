@@ -20,7 +20,8 @@ if project_root not in sys.path:
 
 from shared.database import DatabaseManager, JobModel
 from shared.models import JobStatus
-from shared.storage import get_storage_manager
+from shared.local_storage import get_storage_manager, LocalStorageManager
+from shared.config import get_config
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -45,9 +46,12 @@ celery_config = {
 }
 celery_app.conf.update(celery_config)
 
+# Get configuration
+config = get_config()
+
 # Initialize database and storage
 db_manager = DatabaseManager()
-storage_manager = get_storage_manager()
+storage_manager = get_storage_manager(config.storage_path)
 
 @celery_app.task(bind=True)
 def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
@@ -60,7 +64,8 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
     """
     # Initialize managers for this worker process
     local_db_manager = DatabaseManager()
-    local_storage_manager = get_storage_manager()
+    local_config = get_config()
+    local_storage_manager = get_storage_manager(local_config.storage_path)
     
     try:
         logger.info(f"Starting job {job_id}")
@@ -73,44 +78,26 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
         # Update job status using the database manager method
         local_db_manager.update_job_status(job_id, JobStatus.RUNNING, "Processing gRINN analysis", 25)
         
-        # Create temporary directory for job processing
-        # For mock storage (local dev), use storage location directly to avoid /tmp issue with Docker in WSL2
-        # For cloud storage, download to temp directory
-        use_temp_dir = not hasattr(local_storage_manager, 'base_dir')
-        
-        if use_temp_dir:
-            temp_dir = tempfile.mkdtemp()
-            input_dir = os.path.join(temp_dir, 'input')
-            output_dir = os.path.join(temp_dir, 'output')
-            os.makedirs(input_dir, exist_ok=True)
-            os.makedirs(output_dir, exist_ok=True)
-        else:
-            # Mock storage - use storage location directly (accessible to Docker)
-            base_storage_dir = local_storage_manager.base_dir
-            input_dir = os.path.join(base_storage_dir, job_id, 'input')
-            output_dir = os.path.join(base_storage_dir, job_id, 'output')
-            os.makedirs(output_dir, exist_ok=True)
+        # Use local storage directories directly (accessible via NFS for multi-worker setups)
+        input_dir = local_storage_manager.get_input_directory(job_id)
+        output_dir = local_storage_manager.get_output_directory(job_id)
         
         try:
-            # Download input files from storage (for cloud) or verify they exist (for mock)
-            logger.info(f"Downloading input files for job {job_id}")
+            # Verify input files exist
+            logger.info(f"Verifying input files for job {job_id}")
             
             # Get job details to determine input mode and files
             job = local_db_manager.get_job(job_id)
             input_mode = job_params.get('input_mode', 'trajectory')
             
-            # Download all input files for the job
-            if use_temp_dir:
-                file_paths = local_storage_manager.download_job_inputs(job_id, input_dir)
-            else:
-                # For mock storage, files are already in place
-                file_paths = {}
-                if os.path.exists(input_dir):
-                    for filename in os.listdir(input_dir):
-                        file_path = os.path.join(input_dir, filename)
-                        if os.path.isfile(file_path):
-                            file_paths[filename] = file_path
-                logger.info(f"Using {len(file_paths)} input files from mock storage at {input_dir}")
+            # Files are already in place in local storage (accessible via NFS)
+            file_paths = {}
+            if os.path.exists(input_dir):
+                for filename in os.listdir(input_dir):
+                    file_path = os.path.join(input_dir, filename)
+                    if os.path.isfile(file_path):
+                        file_paths[filename] = file_path
+            logger.info(f"Found {len(file_paths)} input files in local storage at {input_dir}")
             
             # Extract any ZIP files directly in the input directory (before Docker)
             logger.info(f"Checking for ZIP files to extract in {input_dir}")
@@ -305,23 +292,19 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             # Note: Container will be removed by Docker's built-in cleanup or manually
             logger.info(f"Container {container_name} completed successfully. Keeping container for log access (will be cleaned up later).")
             
-            # Upload results to storage
-            logger.info(f"Uploading results for job {job_id}")
+            # Results are already in local storage (output_dir)
+            logger.info(f"Job results stored in {output_dir}")
             
-            # Upload entire results directory to GCS
-            results_gcs_prefix = local_storage_manager.upload_job_results(job_id, output_dir)
+            # Update storage metadata for the results
+            local_storage_manager.upload_job_results(job_id, output_dir)
             
-            # Get list of uploaded result files for job metadata
+            # Get list of result files for job metadata
             result_files = []
             for root, dirs, files in os.walk(output_dir):
                 for file in files:
                     local_path = os.path.join(root, file)
                     relative_path = os.path.relpath(local_path, output_dir)
-                    storage_path = f"{results_gcs_prefix}{relative_path}"
-                    result_files.append(storage_path)
-            
-            # TODO: Add optional cleanup of input files to save storage costs
-            # For now, keeping input files for debugging and reprocessing capabilities
+                    result_files.append(relative_path)
             
             # Update job status to completed
             local_db_manager.update_job_status(job_id, JobStatus.COMPLETED, "Job completed successfully", 100)
@@ -347,11 +330,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             
             raise
         
-        finally:
-            # Cleanup temp directory if we created one
-            if use_temp_dir and os.path.exists(temp_dir):
-                import shutil
-                shutil.rmtree(temp_dir, ignore_errors=True)
+        # No temp directory cleanup needed - using local storage directly
     
     except Exception as e:
         logger.error(f"Job {job_id} failed: {str(e)}")
@@ -367,27 +346,56 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
 @celery_app.task
 def cleanup_old_jobs():
     """
-    Cleanup old jobs and their associated files
+    Cleanup old jobs and their associated files.
+    Uses JOB_FILE_RETENTION_HOURS from config (default: 72 hours / 3 days).
     """
     # Initialize managers for this worker process
     local_db_manager = DatabaseManager()
-    local_storage_manager = get_storage_manager()
+    local_config = get_config()
+    local_storage_manager = get_storage_manager(local_config.storage_path)
     
     try:
-        logger.info("Starting job cleanup")
+        retention_hours = local_config.job_file_retention_hours
+        logger.info(f"Starting job cleanup (retention: {retention_hours} hours)")
         
-        # Get old jobs (older than 7 days) and clean them up
-        deleted_count = local_db_manager.cleanup_old_jobs(days_old=7)
-        logger.info(f"Cleaned up {deleted_count} old jobs")
+        # Clean up old job files from storage
+        files_cleaned = local_storage_manager.cleanup_old_jobs(retention_hours=retention_hours)
+        logger.info(f"Cleaned up files for {files_cleaned} old jobs")
+        
+        # Clean up old job records from database (convert hours to days for DB method)
+        retention_days = max(1, retention_hours // 24)
+        db_cleaned = local_db_manager.cleanup_old_jobs(days_old=retention_days)
+        logger.info(f"Cleaned up {db_cleaned} old job records from database")
             
     except Exception as e:
         logger.error(f"Job cleanup failed: {str(e)}")
 
-# Periodic task to cleanup old jobs (runs daily)
+
+@celery_app.task
+def cleanup_job_files(job_id: str):
+    """
+    Cleanup files for a specific job.
+    Called when a job is cancelled or needs explicit cleanup.
+    
+    Args:
+        job_id: Job identifier to clean up
+    """
+    local_config = get_config()
+    local_storage_manager = get_storage_manager(local_config.storage_path)
+    
+    try:
+        logger.info(f"Cleaning up files for job {job_id}")
+        local_storage_manager.delete_job_files(job_id)
+        logger.info(f"Successfully cleaned up files for job {job_id}")
+    except Exception as e:
+        logger.error(f"Failed to cleanup files for job {job_id}: {str(e)}")
+
+
+# Periodic task to cleanup old jobs (runs every 6 hours)
 celery_app.conf.beat_schedule = {
     'cleanup-old-jobs': {
         'task': 'backend.tasks.cleanup_old_jobs',
-        'schedule': 24 * 60 * 60,  # 24 hours
+        'schedule': 6 * 60 * 60,  # Every 6 hours
     },
 }
 celery_app.conf.timezone = 'UTC'

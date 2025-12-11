@@ -52,15 +52,13 @@ services:
       - BACKEND_PORT=8050
       - FRONTEND_HOST=0.0.0.0
       - FRONTEND_PORT=8051
-      - DEVELOPMENT_MODE=false
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
-      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
-      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+      - STORAGE_PATH=/data/grinn-jobs
+      - WORKER_REGISTRATION_TOKEN=${WORKER_REGISTRATION_TOKEN:-}
+      - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
     volumes:
-      - ./secrets:/app/secrets:ro
+      - grinn_storage:/data/grinn-jobs
       - webapp_logs:/app/logs
-      - webapp_uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,9 +99,7 @@ volumes:
     driver: local
   webapp_logs:
     driver: local
-  webapp_uploads:
-    driver: local
-  grinn_results:
+  grinn_storage:
     driver: local
   grinn_dashboard_logs:
     driver: local

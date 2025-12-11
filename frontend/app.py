@@ -1646,7 +1646,7 @@ def remove_file(n_clicks, stored_files):
         logger.error(f"Error parsing button ID: {triggered_id}, Error: {e}")
         return stored_files
 
-# Note: Old submit_job_to_backend function removed - now using signed URL workflow for direct GCS uploads
+# Note: Job submission now uses local storage via backend API
 
 # Add div to show submission status
 @app.callback(
@@ -1666,7 +1666,7 @@ def remove_file(n_clicks, stored_files):
 def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff, 
                          source_sel, target_sel, privacy_setting, input_mode, 
                          force_field, uploaded_files):
-    """Handle job submission with direct GCS upload using signed URLs."""
+    """Handle job submission with local file upload to backend."""
     logger.info(f"Job submission callback triggered: submit_clicks={submit_clicks}, files={len(uploaded_files) if uploaded_files else 0}")
     
     if not submit_clicks:
@@ -1681,32 +1681,32 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         # Job name is optional - will be None if not provided
         job_name = None
         
-        # Step 1: Request signed URLs from backend
+        # Step 1: Create job in backend
         files_info = []
         for file_data in uploaded_files:
             files_info.append({
                 'filename': file_data['filename'],
                 'file_type': file_data.get('file_type', 'unknown'),
-                'content_type': 'application/octet-stream',  # Generic binary
                 'size': file_data.get('size_bytes', 0)
             })
         
         is_private = 'private' in (privacy_setting or [])
         
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/generate-upload-urls"
-        logger.info(f"Requesting signed URLs from {backend_url}")
+        backend_url = f"{config.backend_url}/api/create-job"
+        logger.info(f"Creating job via {backend_url}")
         
         response = requests.post(
             backend_url,
             json={
                 'files': files_info,
                 'input_mode': input_mode or 'trajectory',
-                'force_field': force_field if input_mode == 'ensemble' else None,
                 'parameters': {
                     'skip_frames': skip_frames or 1,
                     'initpairfilter_cutoff': initpairfilter_cutoff or 12.0,
                     'source_sel': source_sel or None,
-                    'target_sel': target_sel or None
+                    'target_sel': target_sel or None,
+                    'input_mode': input_mode or 'trajectory',
+                    'force_field': force_field if input_mode == 'ensemble' else None
                 },
                 'is_private': is_private,
                 'job_name': job_name,
@@ -1719,105 +1719,61 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             error_msg = response.json().get('error', 'Unknown error')
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                f"Failed to initiate upload: {error_msg}"
+                f"Failed to create job: {error_msg}"
             ], className="alert alert-danger"), no_update
         
         result = response.json()
         job_id = result['job_id']
-        upload_urls = result['upload_urls']
         
-        logger.info(f"Received {len(upload_urls)} signed URLs for job {job_id}")
+        logger.info(f"Job {job_id} created, uploading files")
         
-        # Step 2: Upload files directly to GCS using signed URLs (or handle mock storage)
-        uploaded_successfully = []
-        
-        for url_info in upload_urls:
-            # Find the corresponding file data
-            file_data = next((f for f in uploaded_files if f['filename'] == url_info['filename']), None)
-            if not file_data:
-                logger.error(f"Could not find file data for {url_info['filename']}")
-                continue
-            
+        # Step 2: Upload files to backend local storage
+        for file_data in uploaded_files:
             # Decode base64 content
-            # Note: content is already the base64 string (without the data URI prefix)
-            # since it was stored that way in handle_file_upload
             try:
                 content = base64.b64decode(file_data['content'])
             except Exception as e:
-                logger.error(f"Failed to decode file {url_info['filename']}: {e}")
+                logger.error(f"Failed to decode file {file_data['filename']}: {e}")
                 continue
             
-            upload_url = url_info['upload_url']
+            upload_url = f"{config.backend_url}/api/jobs/{job_id}/upload"
             
-            # Check if using mock storage (local development)
-            if upload_url.startswith('mock://'):
-                logger.info(f"Mock storage detected - writing {url_info['filename']} to local file ({len(content)} bytes)")
-                try:
-                    # Write directly to the file path provided by mock storage
-                    os.makedirs(os.path.dirname(url_info['file_path']), exist_ok=True)
-                    with open(url_info['file_path'], 'wb') as f:
-                        f.write(content)
-                    
-                    uploaded_successfully.append({
-                        'file_type': url_info['file_type'],
-                        'filename': url_info['filename'],
-                        'file_path': url_info['file_path']
-                    })
-                    logger.info(f"Successfully wrote {url_info['filename']} to {url_info['file_path']}")
-                except Exception as e:
-                    error_msg = f"Mock storage write error for {url_info['filename']}: {str(e)}"
+            # Upload file as multipart form data
+            files = {'file': (file_data['filename'], content, 'application/octet-stream')}
+            
+            try:
+                upload_response = requests.post(
+                    upload_url,
+                    files=files,
+                    timeout=300  # 5 minutes for large files
+                )
+                
+                if upload_response.status_code == 200:
+                    logger.info(f"Successfully uploaded {file_data['filename']}")
+                else:
+                    error_msg = f"Upload failed for {file_data['filename']}: {upload_response.status_code}"
                     logger.error(error_msg)
                     return html.Div([
                         html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                         error_msg
                     ], className="alert alert-danger"), no_update
-            else:
-                # Upload directly to GCS using signed URL
-                logger.info(f"Uploading {url_info['filename']} directly to GCS ({len(content)} bytes)")
-                
-                try:
-                    upload_response = requests.put(
-                        upload_url,
-                        data=content,
-                        headers={'Content-Type': 'application/octet-stream'},
-                        timeout=300  # 5 minutes for large files
-                    )
                     
-                    if upload_response.status_code in [200, 201]:
-                        uploaded_successfully.append({
-                            'file_type': url_info['file_type'],
-                            'filename': url_info['filename'],
-                            'file_path': url_info['file_path']
-                        })
-                        logger.info(f"Successfully uploaded {url_info['filename']}")
-                    else:
-                        error_msg = f"Upload failed for {url_info['filename']}: HTTP {upload_response.status_code}"
-                        logger.error(error_msg)
-                        return html.Div([
-                            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                            error_msg
-                        ], className="alert alert-danger"), no_update
-                        
-                except Exception as e:
-                    error_msg = f"Upload error for {url_info['filename']}: {str(e)}"
-                    logger.error(error_msg)
+            except Exception as e:
+                error_msg = f"Upload error for {file_data['filename']}: {str(e)}"
+                logger.error(error_msg)
                 return html.Div([
                     html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                     error_msg
                 ], className="alert alert-danger"), no_update
         
-        # Step 3: Confirm uploads and start processing
-        logger.info(f"Confirming {len(uploaded_successfully)} uploads for job {job_id}")
+        # Step 3: Start job processing
+        logger.info(f"Starting processing for job {job_id}")
         
-        confirm_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/confirm-uploads"
-        confirm_response = requests.post(
-            confirm_url,
-            json={'uploaded_files': uploaded_successfully},
-            timeout=30
-        )
+        start_url = f"{config.backend_url}/api/jobs/{job_id}/start"
+        start_response = requests.post(start_url, timeout=30)
         
-        if confirm_response.status_code != 200:
-            error_msg = confirm_response.json().get('error', 'Failed to start processing')
+        if start_response.status_code != 200:
+            error_msg = start_response.json().get('error', 'Failed to start processing')
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                 f"Files uploaded but processing failed: {error_msg}"
@@ -1875,7 +1831,7 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
     """Update the job monitoring page with real-time data."""
     try:
         # Fetch job details from backend
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}"
+        backend_url = f"{config.backend_url}/api/jobs/{job_id}"
         response = requests.get(backend_url, timeout=10)
         
         if response.status_code != 200:
@@ -1909,6 +1865,27 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
                                 html.Span(job.status.value.title() if isinstance(job.status, JobStatus) else job.status.title(), 
                                         className=f"job-status status-{job.status.value if isinstance(job.status, JobStatus) else job.status}",
                                         style={'marginRight': '10px' if (isinstance(job.status, JobStatus) and job.status == JobStatus.COMPLETED) or (isinstance(job.status, str) and job.status.lower() == 'completed') else '0'}),
+                                # Show Save Results button only if job is completed
+                                html.A(
+                                    [html.I(className="fas fa-download", style={'marginRight': '8px'}), "Save Results"],
+                                    id="monitor-save-results-btn",
+                                    href=f"{config.backend_url}/api/jobs/{job_id}/download",
+                                    download=f"grinn-results-{job_id}.tar.gz",
+                                    style={
+                                        'fontSize': '0.9rem',
+                                        'padding': '6px 12px',
+                                        'verticalAlign': 'middle',
+                                        'backgroundColor': 'rgba(0, 123, 255, 0.1)',
+                                        'color': '#007bff',
+                                        'border': '1px solid rgba(0, 123, 255, 0.3)',
+                                        'borderRadius': '5px',
+                                        'fontWeight': '500',
+                                        'cursor': 'pointer',
+                                        'textDecoration': 'none',
+                                        'display': 'inline-block',
+                                        'marginRight': '10px'
+                                    }
+                                ) if (isinstance(job.status, JobStatus) and job.status == JobStatus.COMPLETED) or (isinstance(job.status, str) and job.status.lower() == 'completed') else html.Span(),
                                 # Show Launch Dashboard button only if job is completed
                                 html.Button(
                                     [html.I(className="fas fa-chart-line", style={'marginRight': '8px'}), "Launch Dashboard"],
@@ -1973,7 +1950,7 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
         
         try:
             # Fetch logs from backend API
-            logs_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/logs"
+            logs_url = f"{config.backend_url}/api/jobs/{job_id}/logs"
             logs_response = requests.get(logs_url, params={'tail': 500}, timeout=5)
             
             if logs_response.status_code == 200:
@@ -2035,7 +2012,7 @@ def update_results_page(job_id):
     """Update the results viewing page."""
     try:
         # Fetch job details from backend
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}"
+        backend_url = f"{config.backend_url}/api/jobs/{job_id}"
         response = requests.get(backend_url, timeout=10)
         
         if response.status_code != 200:
@@ -2054,7 +2031,7 @@ def update_results_page(job_id):
                 f"Job is not completed yet. Current status: {status_display}"
             ], className="alert alert-info")
         
-        if not job.results_gcs_path:
+        if not job.results_path:
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                 "No results available for this job."
@@ -2062,7 +2039,7 @@ def update_results_page(job_id):
         
         # Fetch detailed results information
         try:
-            results_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/results"
+            results_url = f"{config.backend_url}/api/jobs/{job_id}/results"
             results_response = requests.get(results_url, timeout=10)
             
             if results_response.status_code == 200:
@@ -2182,7 +2159,7 @@ def handle_download_results(n_clicks, button_id):
     
     try:
         # Fetch download URLs from backend
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/results"
+        backend_url = f"{config.backend_url}/api/jobs/{job_id}/results"
         response = requests.get(backend_url, timeout=10)
         
         if response.status_code == 200:
@@ -2235,7 +2212,7 @@ def handle_cancel_job(n_clicks, button_id):
     
     try:
         # Send cancellation request to backend
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/cancel"
+        backend_url = f"{config.backend_url}/api/jobs/{job_id}/cancel"
         response = requests.post(backend_url, timeout=10)
         
         if response.status_code == 200:
@@ -2262,7 +2239,7 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
     """Update the job queue table with optional search filter."""
     try:
         # Fetch jobs from backend
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs"
+        backend_url = f"{config.backend_url}/api/jobs"
         params = {}
         if status_filter and status_filter != 'all':
             params['status'] = status_filter
@@ -2371,6 +2348,26 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
                         'fontWeight': '500'
                     }
                 ),
+                html.A(
+                    html.I(className="fas fa-download", title="Save Results"),
+                    href=f"{config.backend_url}/api/jobs/{job_id}/download" if status == 'completed' else "#",
+                    download=f"grinn-results-{job_id}.tar.gz" if status == 'completed' else None,
+                    style={
+                        'display': 'inline-block',
+                        'padding': '6px 12px',
+                        'marginRight': '5px',
+                        'backgroundColor': 'rgba(0, 123, 255, 0.1)' if status == 'completed' else 'rgba(0, 123, 255, 0.05)',
+                        'color': '#007bff' if status == 'completed' else 'rgba(0, 123, 255, 0.5)',
+                        'textDecoration': 'none',
+                        'border': '1px solid rgba(0, 123, 255, 0.3)' if status == 'completed' else '1px solid rgba(0, 123, 255, 0.2)',
+                        'borderRadius': '5px',
+                        'fontSize': '0.9rem',
+                        'fontWeight': '500',
+                        'cursor': 'pointer' if status == 'completed' else 'not-allowed',
+                        'opacity': '1' if status == 'completed' else '0.5',
+                        'pointerEvents': 'auto' if status == 'completed' else 'none'
+                    }
+                ),
                 html.Button(
                     html.I(className="fas fa-chart-line", title="Launch Dashboard"),
                     id={'type': 'launch-dashboard-btn', 'job_id': job_id},
@@ -2441,9 +2438,7 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
     prevent_initial_call=True
 )
 def launch_dashboard(n_clicks_list, button_ids):
-    """Handle dashboard launch button clicks - store URL to open in new tab."""
-    import requests
-    
+    """Handle dashboard launch button clicks - navigate to dashboard page with loading screen."""
     # Handle empty lists or no clicks
     if not n_clicks_list or not button_ids or not any(n_clicks_list):
         return no_update
@@ -2460,26 +2455,8 @@ def launch_dashboard(n_clicks_list, button_ids):
     
     job_id = button_ids[clicked_idx]['job_id']
     
-    try:
-        # Call backend API to start dashboard
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
-        response = requests.post(backend_url, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('success'):
-                # Return URL to be opened in new tab by clientside callback
-                return f"/dashboard/{job_id}"
-            else:
-                logger.error(f"Failed to start dashboard: {data.get('error')}")
-                return no_update
-        else:
-            logger.error(f"Server returned {response.status_code}")
-            return no_update
-            
-    except Exception as e:
-        logger.error(f"Error launching dashboard for {job_id}: {e}")
-        return no_update
+    # Return URL to navigate to dashboard page (which will show loading screen)
+    return f"/dashboard/{job_id}"
 
 
 # Clientside callback to open dashboard in new tab
@@ -2516,32 +2493,12 @@ def close_dashboard_modal(close_x, close_btn):
     prevent_initial_call=True
 )
 def launch_monitor_dashboard(n_clicks, job_id):
-    """Handle dashboard launch from monitor page - store URL to open in new tab."""
-    import requests
-    
+    """Handle dashboard launch from monitor page - navigate to dashboard page with loading screen."""
     if not n_clicks:
         return no_update
     
-    try:
-        # Call backend API to start dashboard
-        backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
-        response = requests.post(backend_url, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('success'):
-                # Return URL to be opened in new tab by clientside callback
-                return f"/dashboard/{job_id}"
-            else:
-                logger.error(f"Failed to start dashboard: {data.get('error')}")
-                return no_update
-        else:
-            logger.error(f"Server returned {response.status_code}")
-            return no_update
-            
-    except Exception as e:
-        logger.error(f"Error launching dashboard for {job_id}: {e}")
-        return no_update
+    # Return URL to navigate to dashboard page (which will show loading screen)
+    return f"/dashboard/{job_id}"
 
 
 # Clientside callback to open monitor dashboard in new tab
@@ -2587,7 +2544,7 @@ def update_dashboard_status(n_intervals, job_id):
     
     try:
         # Get job details
-        job_backend_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}"
+        job_backend_url = f"{config.backend_url}/api/jobs/{job_id}"
         job_response = requests.get(job_backend_url, timeout=10)
         
         if job_response.status_code != 200:
@@ -2609,31 +2566,143 @@ def update_dashboard_status(n_intervals, job_id):
         job_name = job_data.get('job_name') or f"Job {job_id[:12]}"
         
         # Check dashboard status
-        status_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/status"
+        status_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/status"
         status_response = requests.get(status_url, timeout=10)
         
+        # Fetch logs regardless of status (we'll need them for all loading states)
+        logs_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/logs"
+        logs_text = 'Initializing dashboard container...\nWaiting for logs...'
+        try:
+            logs_response = requests.get(logs_url, timeout=5)
+            if logs_response.status_code == 200:
+                logs_data = logs_response.json()
+                if logs_data.get('success'):
+                    fetched_logs = logs_data.get('logs', '').strip()
+                    if fetched_logs:
+                        logs_text = fetched_logs
+                    else:
+                        logs_text = 'Container starting...\nNo logs yet. Please wait...'
+                else:
+                    # Dashboard not started yet
+                    logs_text = 'Dashboard not started yet...\nInitializing...'
+            else:
+                logs_text = 'Waiting for dashboard container...\nLogs will appear once container starts...'
+        except Exception as log_error:
+            logger.warning(f"Could not fetch dashboard logs: {log_error}")
+            logs_text = 'Dashboard starting...\nLogs will appear shortly...'
+        
         if status_response.status_code != 200:
-            # Dashboard not started - auto-start it
+            # Dashboard not started - auto-start it and show terminal
             try:
-                start_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
+                start_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/start"
                 start_response = requests.post(start_url, timeout=30)
                 if start_response.status_code == 200:
-                    # Successfully triggered start, show loading screen
+                    # Successfully triggered start, show loading screen with terminal
                     return html.Div([
+                        # Header section
                         html.Div([
                             html.I(className="fas fa-spinner fa-spin", 
-                                  style={'fontSize': '3rem', 'color': '#7C9885', 'marginBottom': '20px'}),
-                            html.H3("Starting Dashboard...", style={'color': '#5A7A60', 'marginBottom': '10px'}),
-                            html.P("Please wait while we prepare your data visualization.", 
-                                  style={'color': '#666', 'fontSize': '1.1rem'})
+                                  style={'fontSize': '2.5rem', 'color': '#7C9885', 'marginBottom': '15px'}),
+                            html.H2("Preparing Dashboard", style={
+                                'color': '#5A7A60', 
+                                'marginBottom': '10px',
+                                'fontSize': '1.8rem',
+                                'fontWeight': '500'
+                            }),
+                            html.P("Setting up data visualization environment...", 
+                                  style={
+                                      'color': '#666', 
+                                      'fontSize': '1rem',
+                                      'marginBottom': '25px'
+                                  })
                         ], style={
                             'textAlign': 'center',
-                            'paddingTop': '20vh',
-                            'display': 'flex',
-                            'flexDirection': 'column',
-                            'alignItems': 'center'
-                        })
-                    ])
+                            'paddingTop': '8vh',
+                            'paddingBottom': '20px'
+                        }),
+                        
+                        # Terminal-style log viewer
+                        html.Div([
+                            html.Div([
+                                html.Span("Dashboard Container Logs", style={
+                                    'fontSize': '0.9rem',
+                                    'fontWeight': '500',
+                                    'color': '#5A7A60'
+                                }),
+                                html.Span(f"Job ID: {job_id[:16]}...", style={
+                                    'fontSize': '0.8rem',
+                                    'color': '#8A9A8A',
+                                    'marginLeft': '15px'
+                                })
+                            ], style={
+                                'padding': '12px 20px',
+                                'backgroundColor': '#2d2d30',
+                                'borderBottom': '1px solid #3e3e42',
+                                'display': 'flex',
+                                'justifyContent': 'space-between',
+                                'alignItems': 'center'
+                            }),
+                            
+                            html.Pre(
+                                logs_text,
+                                id='dashboard-log-content',
+                                style={
+                                    'backgroundColor': '#1e1e1e',
+                                    'color': '#d4d4d4',
+                                    'padding': '20px',
+                                    'margin': '0',
+                                    'fontSize': '13px',
+                                    'fontFamily': "'Consolas', 'Monaco', 'Courier New', monospace",
+                                    'height': '400px',
+                                    'overflowY': 'auto',
+                                    'whiteSpace': 'pre-wrap',
+                                    'wordWrap': 'break-word',
+                                    'lineHeight': '1.5'
+                                }
+                            )
+                        ], style={
+                            'maxWidth': '900px',
+                            'margin': '0 auto',
+                            'borderRadius': '8px',
+                            'overflow': 'hidden',
+                            'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.1)',
+                            'backgroundColor': '#1e1e1e'
+                        }),
+                        
+                        # Status message
+                        html.Div([
+                            html.Div([
+                                html.I(className="fas fa-info-circle", style={'marginRight': '8px', 'color': '#7C9885'}),
+                                html.Span("This typically takes 5-10 minutes. ", style={'color': '#666'}),
+                                html.Span("The dashboard will appear automatically once ready.", 
+                                        style={'color': '#666', 'fontWeight': '500'})
+                            ], style={
+                                'display': 'inline-flex',
+                                'alignItems': 'center',
+                                'backgroundColor': '#f8f9fa',
+                                'padding': '12px 20px',
+                                'borderRadius': '5px',
+                                'fontSize': '0.9rem',
+                                'marginTop': '25px'
+                            })
+                        ], style={'textAlign': 'center'}),
+                        
+                        # JavaScript to auto-scroll logs to bottom
+                        html.Script("""
+                            setTimeout(function() {
+                                var logContent = document.getElementById('dashboard-log-content');
+                                if (logContent) {
+                                    logContent.scrollTop = logContent.scrollHeight;
+                                }
+                            }, 100);
+                        """)
+                    ], style={
+                        'width': '100vw',
+                        'height': '100vh',
+                        'padding': '0 20px',
+                        'backgroundColor': '#ffffff',
+                        'overflow': 'auto'
+                    })
             except Exception as e:
                 logger.error(f"Failed to auto-start dashboard: {e}")
             
@@ -2656,19 +2725,48 @@ def update_dashboard_status(n_intervals, job_id):
         
         status_data = status_response.json()
         
-        if not status_data.get('running'):
-            # Dashboard not running - try to start it
+        # Log the status for debugging
+        logger.info(f"Dashboard status for {job_id}: running={status_data.get('running')}, ready={status_data.get('ready')}, started_at={status_data.get('started_at')}")
+        
+        # Calculate elapsed time since dashboard started
+        elapsed_seconds = 0
+        if status_data.get('started_at'):
             try:
-                start_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/start"
-                start_response = requests.post(start_url, timeout=30)
-                if start_response.status_code == 200:
+                from datetime import datetime
+                started_at = datetime.fromisoformat(status_data['started_at'].replace('Z', '+00:00'))
+                elapsed_seconds = (datetime.utcnow() - started_at).total_seconds()
+                logger.info(f"Dashboard for {job_id} has been running for {elapsed_seconds:.1f} seconds")
+            except Exception as e:
+                logger.warning(f"Could not calculate elapsed time: {e}")
+        
+        # If not running OR not ready, show terminal with logs
+        if not status_data.get('running') or not status_data.get('ready'):
+            # Try to start if not running
+            if not status_data.get('running'):
+                try:
+                    start_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/start"
+                    start_response = requests.post(start_url, timeout=30)
+                    if start_response.status_code != 200:
+                        return html.Div([
+                            html.Div([
+                                html.I(className="fas fa-exclamation-circle", 
+                                      style={'fontSize': '3rem', 'color': '#ffc107', 'marginBottom': '20px'}),
+                                html.H3("Dashboard Not Running", style={'color': '#5A7A60'})
+                            ], style={
+                                'textAlign': 'center',
+                                'paddingTop': '20vh',
+                                'display': 'flex',
+                                'flexDirection': 'column',
+                                'alignItems': 'center'
+                            })
+                        ])
+                except Exception as e:
+                    logger.error(f"Failed to start dashboard: {e}")
                     return html.Div([
                         html.Div([
-                            html.I(className="fas fa-spinner fa-spin", 
-                                  style={'fontSize': '3rem', 'color': '#7C9885', 'marginBottom': '20px'}),
-                            html.H3("Starting Dashboard...", style={'color': '#5A7A60', 'marginBottom': '10px'}),
-                            html.P("Please wait while we prepare your data visualization.", 
-                                  style={'color': '#666', 'fontSize': '1.1rem'})
+                            html.I(className="fas fa-exclamation-circle", 
+                                  style={'fontSize': '3rem', 'color': '#ffc107', 'marginBottom': '20px'}),
+                            html.H3("Dashboard Not Running", style={'color': '#5A7A60'})
                         ], style={
                             'textAlign': 'center',
                             'paddingTop': '20vh',
@@ -2677,14 +2775,251 @@ def update_dashboard_status(n_intervals, job_id):
                             'alignItems': 'center'
                         })
                     ])
-            except Exception as e:
-                logger.error(f"Failed to start dashboard: {e}")
             
+            # Show loading screen with terminal and logs
+            return html.Div([
+                # Header section
+                html.Div([
+                    html.I(className="fas fa-spinner fa-spin", 
+                          style={'fontSize': '2.5rem', 'color': '#7C9885', 'marginBottom': '15px'}),
+                    html.H2("Preparing Dashboard", style={
+                        'color': '#5A7A60', 
+                        'marginBottom': '10px',
+                        'fontSize': '1.8rem',
+                        'fontWeight': '500'
+                    }),
+                    html.P("Setting up data visualization environment...", 
+                          style={
+                              'color': '#666', 
+                              'fontSize': '1rem',
+                              'marginBottom': '25px'
+                          })
+                ], style={
+                    'textAlign': 'center',
+                    'paddingTop': '8vh',
+                    'paddingBottom': '20px'
+                }),
+                
+                # Terminal-style log viewer
+                html.Div([
+                    html.Div([
+                        html.Span("Dashboard Container Logs", style={
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'color': '#5A7A60'
+                        }),
+                        html.Span(f"Job ID: {job_id[:16]}...", style={
+                            'fontSize': '0.8rem',
+                            'color': '#8A9A8A',
+                            'marginLeft': '15px'
+                        })
+                    ], style={
+                        'padding': '12px 20px',
+                        'backgroundColor': '#2d2d30',
+                        'borderBottom': '1px solid #3e3e42',
+                        'display': 'flex',
+                        'justifyContent': 'space-between',
+                        'alignItems': 'center'
+                    }),
+                    
+                    html.Pre(
+                        logs_text,
+                        id='dashboard-log-content',
+                        style={
+                            'backgroundColor': '#1e1e1e',
+                            'color': '#d4d4d4',
+                            'padding': '20px',
+                            'margin': '0',
+                            'fontSize': '13px',
+                            'fontFamily': "'Consolas', 'Monaco', 'Courier New', monospace",
+                            'height': '400px',
+                            'overflowY': 'auto',
+                            'whiteSpace': 'pre-wrap',
+                            'wordWrap': 'break-word',
+                            'lineHeight': '1.5'
+                        }
+                    )
+                ], style={
+                    'maxWidth': '900px',
+                    'margin': '0 auto',
+                    'borderRadius': '8px',
+                    'overflow': 'hidden',
+                    'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.1)',
+                    'backgroundColor': '#1e1e1e'
+                }),
+                
+                # Status message
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-info-circle", style={'marginRight': '8px', 'color': '#7C9885'}),
+                        html.Span("This typically takes 5-10 minutes. ", style={'color': '#666'}),
+                        html.Span("The dashboard will appear automatically once ready.", 
+                                style={'color': '#666', 'fontWeight': '500'})
+                    ], style={
+                        'display': 'inline-flex',
+                        'alignItems': 'center',
+                        'backgroundColor': '#f8f9fa',
+                        'padding': '12px 20px',
+                        'borderRadius': '5px',
+                        'fontSize': '0.9rem',
+                        'marginTop': '25px'
+                    })
+                ], style={'textAlign': 'center'}),
+                
+                # JavaScript to auto-scroll logs to bottom
+                html.Script("""
+                    setTimeout(function() {
+                        var logContent = document.getElementById('dashboard-log-content');
+                        if (logContent) {
+                            logContent.scrollTop = logContent.scrollHeight;
+                        }
+                    }, 100);
+                """)
+            ], style={
+                'width': '100vw',
+                'height': '100vh',
+                'padding': '0 20px',
+                'backgroundColor': '#ffffff',
+                'overflow': 'auto'
+            })
+        
+        # Dashboard is ready! But double-check to be absolutely sure
+        # Only show iframe if BOTH running and ready are True, AND at least 3 seconds have passed
+        if (status_data.get('running') is True and 
+            status_data.get('ready') is True and 
+            elapsed_seconds >= 3):
+            
+            dashboard_url = status_data.get('url')
+            logger.info(f"Dashboard ready for {job_id} after {elapsed_seconds:.1f}s, showing iframe at {dashboard_url}")
+            
+            return html.Iframe(
+                src=dashboard_url,
+                style={
+                    'width': '100%',
+                    'height': '100%',
+                    'border': 'none',
+                    'margin': '0',
+                    'padding': '0',
+                    'display': 'block'
+                }
+            )
+        elif status_data.get('running') is True and status_data.get('ready') is True:
+            # Ready=True but less than 3 seconds - force wait
+            logger.info(f"Dashboard marked ready but only {elapsed_seconds:.1f}s elapsed, waiting...")
+            return html.Div([
+                # Header section
+                html.Div([
+                    html.I(className="fas fa-spinner fa-spin", 
+                          style={'fontSize': '2.5rem', 'color': '#7C9885', 'marginBottom': '15px'}),
+                    html.H2("Dashboard Almost Ready", style={
+                        'color': '#5A7A60', 
+                        'marginBottom': '10px',
+                        'fontSize': '1.8rem',
+                        'fontWeight': '500'
+                    }),
+                    html.P("Final checks in progress...", 
+                          style={
+                              'color': '#666', 
+                              'fontSize': '1rem',
+                              'marginBottom': '25px'
+                          })
+                ], style={
+                    'textAlign': 'center',
+                    'paddingTop': '8vh',
+                    'paddingBottom': '20px'
+                }),
+                
+                # Terminal-style log viewer
+                html.Div([
+                    html.Div([
+                        html.Span("Dashboard Container Logs", style={
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'color': '#5A7A60'
+                        }),
+                        html.Span(f"Job ID: {job_id[:16]}...", style={
+                            'fontSize': '0.8rem',
+                            'color': '#8A9A8A',
+                            'marginLeft': '15px'
+                        })
+                    ], style={
+                        'padding': '12px 20px',
+                        'backgroundColor': '#2d2d30',
+                        'borderBottom': '1px solid #3e3e42',
+                        'display': 'flex',
+                        'justifyContent': 'space-between',
+                        'alignItems': 'center'
+                    }),
+                    
+                    html.Pre(
+                        logs_text,
+                        id='dashboard-log-content',
+                        style={
+                            'backgroundColor': '#1e1e1e',
+                            'color': '#d4d4d4',
+                            'padding': '20px',
+                            'margin': '0',
+                            'fontSize': '13px',
+                            'fontFamily': "'Consolas', 'Monaco', 'Courier New', monospace",
+                            'height': '400px',
+                            'overflowY': 'auto',
+                            'whiteSpace': 'pre-wrap',
+                            'wordWrap': 'break-word',
+                            'lineHeight': '1.5'
+                        }
+                    )
+                ], style={
+                    'maxWidth': '900px',
+                    'margin': '0 auto',
+                    'borderRadius': '8px',
+                    'overflow': 'hidden',
+                    'boxShadow': '0 4px 6px rgba(0, 0, 0, 0.1)',
+                    'backgroundColor': '#1e1e1e'
+                }),
+                
+                # Status message
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-check-circle", style={'marginRight': '8px', 'color': '#7C9885'}),
+                        html.Span(f"Dashboard will appear in {max(0, 3 - elapsed_seconds):.0f} seconds...", 
+                                style={'color': '#666', 'fontWeight': '500'})
+                    ], style={
+                        'display': 'inline-flex',
+                        'alignItems': 'center',
+                        'backgroundColor': '#e8f5e9',
+                        'padding': '12px 20px',
+                        'borderRadius': '5px',
+                        'fontSize': '0.9rem',
+                        'marginTop': '25px'
+                    })
+                ], style={'textAlign': 'center'}),
+                
+                # JavaScript to auto-scroll logs to bottom
+                html.Script("""
+                    setTimeout(function() {
+                        var logContent = document.getElementById('dashboard-log-content');
+                        if (logContent) {
+                            logContent.scrollTop = logContent.scrollHeight;
+                        }
+                    }, 100);
+                """)
+            ], style={
+                'width': '100vw',
+                'height': '100vh',
+                'padding': '0 20px',
+                'backgroundColor': '#ffffff',
+                'overflow': 'auto'
+            })
+        else:
+            # Safety fallback - if we somehow got here without being ready, show loading
+            logger.warning(f"Dashboard status check passed but ready={status_data.get('ready')}, running={status_data.get('running')}")
             return html.Div([
                 html.Div([
-                    html.I(className="fas fa-exclamation-circle", 
-                          style={'fontSize': '3rem', 'color': '#ffc107', 'marginBottom': '20px'}),
-                    html.H3("Dashboard Not Running", style={'color': '#5A7A60'})
+                    html.I(className="fas fa-spinner fa-spin", 
+                          style={'fontSize': '2.5rem', 'color': '#7C9885', 'marginBottom': '15px'}),
+                    html.H3("Dashboard Status Check...", style={'color': '#5A7A60'}),
+                    html.P(f"Running: {status_data.get('running')}, Ready: {status_data.get('ready')}", 
+                          style={'color': '#666', 'fontSize': '0.9rem', 'fontFamily': 'monospace'})
                 ], style={
                     'textAlign': 'center',
                     'paddingTop': '20vh',
@@ -2693,70 +3028,6 @@ def update_dashboard_status(n_intervals, job_id):
                     'alignItems': 'center'
                 })
             ])
-        
-        if not status_data.get('ready'):
-            # Dashboard starting but not ready yet - show loading with logs
-            logs_url = f"http://{config.backend_host}:{config.backend_port}/api/jobs/{job_id}/dashboard/logs"
-            try:
-                logs_response = requests.get(logs_url, timeout=5)
-                if logs_response.status_code == 200:
-                    logs_data = logs_response.json()
-                    logs_text = logs_data.get('logs', 'Initializing...')
-                else:
-                    logs_text = 'Preparing data...'
-            except:
-                logs_text = 'Preparing data...'
-            
-            return html.Div([
-                html.Div([
-                    html.I(className="fas fa-spinner fa-spin", 
-                          style={'fontSize': '3rem', 'color': '#7C9885', 'marginBottom': '20px'}),
-                    html.H3("Preparing Dashboard...", style={'color': '#5A7A60', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.Pre(
-                            logs_text,
-                            style={
-                                'backgroundColor': '#1e1e1e',
-                                'color': '#d4d4d4',
-                                'padding': '20px',
-                                'borderRadius': '8px',
-                                'fontSize': '13px',
-                                'fontFamily': 'monospace',
-                                'maxHeight': '300px',
-                                'maxWidth': '800px',
-                                'overflowY': 'auto',
-                                'whiteSpace': 'pre-wrap',
-                                'wordWrap': 'break-word',
-                                'textAlign': 'left'
-                            }
-                        )
-                    ], style={'marginBottom': '20px'}),
-                    html.P("This typically takes 5-10 minutes. The page will update automatically.", 
-                          style={'color': '#666', 'fontSize': '0.95rem', 'fontStyle': 'italic'})
-                ], style={
-                    'textAlign': 'center',
-                    'paddingTop': '10vh',
-                    'display': 'flex',
-                    'flexDirection': 'column',
-                    'alignItems': 'center',
-                    'padding': '20px'
-                })
-            ])
-        
-        # Dashboard is ready! Show iframe in full screen
-        dashboard_url = status_data.get('url')
-        
-        return html.Iframe(
-            src=dashboard_url,
-            style={
-                'width': '100%',
-                'height': '100%',
-                'border': 'none',
-                'margin': '0',
-                'padding': '0',
-                'display': 'block'
-            }
-        )
         
     except Exception as e:
         logger.error(f"Error updating dashboard status for {job_id}: {e}")
@@ -2768,9 +3039,10 @@ def update_dashboard_status(n_intervals, job_id):
 
 if __name__ == '__main__':
     try:
-        # Skip GCS validation for frontend in development mode
-        config.validate(skip_gcs_validation=True)
+        # Validate configuration
+        config.validate()
         logger.info("Starting gRINN Web Service Frontend")
+        logger.info(f"Storage path: {config.storage_path}")
         app.run(
             host=config.frontend_host,
             port=config.frontend_port,

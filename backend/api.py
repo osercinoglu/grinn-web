@@ -24,8 +24,10 @@ if project_root not in sys.path:
 
 from shared.models import Job, JobStatus, JobParameters, FileType, JobFile, JobSubmissionRequest
 from shared.config import get_config, setup_logging
-from shared.storage import get_storage_manager
+from shared.local_storage import get_storage_manager
+from shared.worker_registry import WorkerRegistry, get_worker_registry, generate_registration_token
 from shared.database import DatabaseManager, JobModel, JobStatus as DBJobStatus
+import redis
 
 # Import Celery tasks
 try:
@@ -54,21 +56,35 @@ CORS(app)  # Enable CORS for frontend communication
 storage_manager = None
 database_manager = None
 dashboard_manager = None
+worker_registry = None
+redis_client = None
 _managers_initialized = False
 
 def initialize_managers():
     """Initialize storage and database managers."""
-    global storage_manager, database_manager, dashboard_manager, _managers_initialized
+    global storage_manager, database_manager, dashboard_manager, worker_registry, redis_client, _managers_initialized
     
     if _managers_initialized:
         return True
         
     try:
-        storage_manager = get_storage_manager()
+        # Initialize local storage
+        storage_manager = get_storage_manager(config.storage_path)
         database_manager = DatabaseManager()
         
         # Initialize database if needed
         database_manager.init_db()
+        
+        # Initialize Redis client for worker registry
+        redis_client = redis.Redis(
+            host=config.redis_host,
+            port=config.redis_port,
+            db=config.redis_db,
+            decode_responses=False
+        )
+        
+        # Initialize worker registry
+        worker_registry = get_worker_registry(redis_client)
         
         # Initialize dashboard manager with public host from config
         dashboard_manager = DashboardManager(
@@ -98,14 +114,10 @@ def health():
         'version': '1.0.0'
     })
 
-# NOTE: Legacy POST /api/jobs endpoint removed.
-# Job submission now uses signed URL workflow:
-# 1. POST /api/generate-upload-urls - creates job, returns signed URLs
-# 2. Frontend uploads files directly to GCS using signed URLs
-# 3. POST /api/jobs/<job_id>/confirm-uploads - verifies uploads and starts processing
-# This eliminates file transfer through backend, reducing bandwidth and improving scalability.
-
-# Old get_all_jobs function removed - replaced by get_jobs function
+# NOTE: Job submission workflow:
+# 1. POST /api/jobs - creates job, returns job_id and upload endpoint
+# 2. POST /api/jobs/<job_id>/upload - upload files to local storage
+# 3. POST /api/jobs/<job_id>/start - starts processing
 
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job(job_id: str):
@@ -130,7 +142,7 @@ def get_job(job_id: str):
             'user_email': job.user_email,
             'parameters': job.parameters,
             'input_files': job.input_files,
-            'results_gcs_path': job.results_gcs_path,
+            'results_path': job.results_gcs_path,  # Legacy field name kept for compatibility
             'error_message': job.error_message,
             'worker_id': job.worker_id
         }
@@ -255,11 +267,11 @@ def get_jobs():
         logger.error(f"Error getting jobs: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
-@app.route('/api/generate-upload-urls', methods=['POST'])
-def generate_upload_urls():
+@app.route('/api/create-job', methods=['POST'])
+def create_job():
     """
-    Generate signed URLs for direct file uploads to GCS.
-    This allows frontend to upload files directly to cloud storage without passing through backend.
+    Create a new job and prepare for file uploads.
+    Returns job_id for use with /api/jobs/<job_id>/upload endpoint.
     """
     try:
         ensure_managers_initialized()
@@ -282,21 +294,17 @@ def generate_upload_urls():
                 return jsonify({'error': f'File entry {i} must be an object'}), 400
             if not file_info.get('filename'):
                 return jsonify({'error': f'File entry {i} missing filename'}), 400
-            if not file_info.get('content_type'):
-                return jsonify({'error': f'File entry {i} missing content_type'}), 400
         
-        files_info = data['files']
         input_mode = data.get('input_mode', 'trajectory')
-        force_field = data.get('force_field')
         parameters = data.get('parameters', {})
         is_private = data.get('is_private', False)
-        job_name = data.get('job_name')  # Optional user-provided name
+        job_name = data.get('job_name')
         
         # Create job in database with status 'pending_upload'
         mode_desc = 'Ensemble' if input_mode == 'ensemble' else 'Trajectory'
         with database_manager.get_session() as session:
             job_model = JobModel(
-                job_name=job_name,  # Can be None
+                job_name=job_name,
                 description=data.get('description', f'{mode_desc} analysis using gRINN'),
                 user_email=data.get('user_email'),
                 is_private=is_private,
@@ -311,9 +319,12 @@ def generate_upload_urls():
             session.commit()
             job_id = job_model.id
         
-        logger.info(f"Created job {job_id} for signed URL upload")
+        logger.info(f"Created job {job_id} for local file upload")
         
-        # Update status to pending_upload
+        # Create job directories in local storage
+        storage_manager.create_job_directories(job_id)
+        
+        # Update status to pending upload
         database_manager.update_job_status(
             job_id,
             DBJobStatus.PENDING,
@@ -321,125 +332,115 @@ def generate_upload_urls():
             progress_percentage=0
         )
         
-        # Generate signed URLs for each file
-        try:
-            # Validate storage manager interface before using
-            if not hasattr(storage_manager, 'generate_multiple_signed_upload_urls'):
-                logger.error("Storage manager missing generate_multiple_signed_upload_urls method")
-                return jsonify({'error': 'Storage configuration error'}), 500
-                
-            upload_urls = storage_manager.generate_multiple_signed_upload_urls(
-                job_id=job_id,
-                files_info=files_info,
-                expiration_minutes=60  # URLs valid for 1 hour
-            )
-            
-            if not upload_urls:
-                logger.error(f"No upload URLs generated for job {job_id}")
-                return jsonify({'error': 'Failed to generate upload URLs'}), 500
-            
-            logger.info(f"Generated {len(upload_urls)} signed upload URLs for job {job_id}")
-            
-            return jsonify({
-                'success': True,
-                'job_id': job_id,
-                'upload_urls': upload_urls,
-                'expires_at': upload_urls[0].get('expires_at') if upload_urls else None,
-                'message': 'Upload URLs generated successfully'
-            })
-            
-        except TypeError as e:
-            logger.error(f"Storage manager method signature error for job {job_id}: {e}")
-            # Update job status to failed
-            database_manager.update_job_status(
-                job_id,
-                DBJobStatus.FAILED,
-                current_step="Failed to generate upload URLs",
-                error_message=f"Storage interface error: {str(e)}"
-            )
-            return jsonify({'error': 'Storage interface error - check method signatures'}), 500
-            
-        except Exception as e:
-            logger.error(f"Failed to generate upload URLs for job {job_id}: {e}")
-            # Update job status to failed
-            database_manager.update_job_status(
-                job_id,
-                DBJobStatus.FAILED,
-                current_step="Failed to generate upload URLs", 
-                error_message=str(e)
-            )
-            return jsonify({'error': f'Failed to generate upload URLs: {str(e)}'}), 500
-            
-        except Exception as e:
-            # Clean up job if URL generation fails
-            database_manager.update_job_status(
-                job_id,
-                DBJobStatus.FAILED,
-                current_step="Failed to generate upload URLs",
-                error_message=str(e)
-            )
-            raise
+        # Return job info with upload endpoint
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'upload_endpoint': f'/api/jobs/{job_id}/upload',
+            'expected_files': [f['filename'] for f in files_info],
+            'message': 'Job created. Upload files using the upload endpoint.'
+        })
         
     except Exception as e:
-        logger.error(f"Error generating upload URLs: {e}")
-        return jsonify({'error': f'Failed to generate upload URLs: {str(e)}'}), 500
+        logger.error(f"Error creating job: {e}")
+        return jsonify({'error': f'Failed to create job: {str(e)}'}), 500
 
-@app.route('/api/jobs/<job_id>/confirm-uploads', methods=['POST'])
-def confirm_uploads(job_id: str):
+
+@app.route('/api/jobs/<job_id>/upload', methods=['POST'])
+def upload_job_file(job_id: str):
     """
-    Confirm that all files have been uploaded and start processing.
-    This is called after frontend completes direct uploads to GCS.
+    Upload a file for a job to local storage.
+    Files are uploaded via multipart/form-data.
     """
     try:
         ensure_managers_initialized()
         
-        # Get job from database and check status within session context
-        job_status = None
+        # Check job exists and is in right state
+        with database_manager.get_session() as session:
+            job = session.query(JobModel).filter(JobModel.id == job_id).first()
+            if not job:
+                return jsonify({'error': 'Job not found'}), 404
+            
+            if job.status not in [DBJobStatus.PENDING, DBJobStatus.UPLOADING]:
+                return jsonify({
+                    'error': f'Job is in {job.status.value} state, cannot upload files'
+                }), 400
+        
+        # Update status to uploading
+        database_manager.update_job_status(
+            job_id,
+            DBJobStatus.UPLOADING,
+            current_step="Uploading files",
+            progress_percentage=10
+        )
+        
+        # Handle file upload
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file in request'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No filename provided'}), 400
+        
+        filename = file.filename
+        content = file.read()
+        
+        # Save to local storage
+        file_path = storage_manager.upload_file_content(
+            job_id=job_id,
+            filename=filename,
+            content=content,
+            file_type="input"
+        )
+        
+        logger.info(f"Uploaded file {filename} for job {job_id}: {len(content)} bytes")
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'size': len(content),
+            'path': file_path
+        })
+        
+    except Exception as e:
+        logger.error(f"Error uploading file for job {job_id}: {e}")
+        return jsonify({'error': f'Upload failed: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/<job_id>/start', methods=['POST'])
+def start_job_processing(job_id: str):
+    """
+    Start processing a job after all files have been uploaded.
+    Verifies files exist in local storage and submits to Celery queue.
+    """
+    try:
+        ensure_managers_initialized()
+        
+        # Get job from database and check status
         with database_manager.get_session() as session:
             job = session.query(JobModel).filter(JobModel.id == job_id).first()
             if not job:
                 return jsonify({'error': 'Job not found'}), 404
             
             job_status = job.status
+            expected_files = job.input_files or []
         
         # Check job is in the right state
         if job_status not in [DBJobStatus.PENDING, DBJobStatus.UPLOADING]:
             return jsonify({
-                'error': f'Job is in {job_status.value} state, cannot confirm uploads'
+                'error': f'Job is in {job_status.value} state, cannot start processing'
             }), 400
         
-        data = request.get_json()
-        logger.info(f"Received confirm-uploads request data: {data}")
-        uploaded_files = data.get('uploaded_files', [])
-        logger.info(f"Extracted uploaded_files: {uploaded_files}")
+        # Verify files exist in local storage
+        input_dir = storage_manager.get_input_directory(job_id)
+        if not os.path.exists(input_dir):
+            return jsonify({'error': 'No input files found'}), 400
         
-        if not uploaded_files:
-            return jsonify({'error': 'uploaded_files list is required'}), 400
+        actual_files = os.listdir(input_dir)
+        if not actual_files:
+            return jsonify({'error': 'No input files found in storage'}), 400
         
-        # Verify all files were actually uploaded to GCS
-        all_verified = True
-        for file_info in uploaded_files:
-            file_path = file_info.get('file_path')
-            if not file_path:
-                continue
-            
-            if not storage_manager.verify_file_uploaded(file_path):
-                logger.error(f"File not found in GCS: {file_path}")
-                all_verified = False
-                break
-        
-        if not all_verified:
-            database_manager.update_job_status(
-                job_id,
-                DBJobStatus.FAILED,
-                current_step="File verification failed",
-                error_message="Not all files were successfully uploaded to cloud storage"
-            )
-            return jsonify({
-                'error': 'File verification failed - not all files found in storage'
-            }), 400
-        
-        logger.info(f"Verified all {len(uploaded_files)} files uploaded for job {job_id}")
+        logger.info(f"Found {len(actual_files)} files in storage for job {job_id}")
         
         # Update job status to queued
         database_manager.update_job_status(
@@ -454,7 +455,7 @@ def confirm_uploads(job_id: str):
             if process_grinn_job is None:
                 raise ImportError("process_grinn_job task not available")
             
-            # Get parameters from job within session context
+            # Get parameters from job
             parameters = {}
             with database_manager.get_session() as session:
                 job_model = session.query(JobModel).filter(JobModel.id == job_id).first()
@@ -464,16 +465,8 @@ def confirm_uploads(job_id: str):
             # Submit task to Celery
             task = process_grinn_job.delay(job_id, parameters)
             
-            # Update job with Celery task ID using existing method
+            # Update job with Celery task ID
             database_manager.set_worker_info(job_id, task.id)
-            
-            # Update job status to indicate processing started
-            database_manager.update_job_status(
-                job_id,
-                DBJobStatus.QUEUED,
-                current_step="Processing started",
-                progress_percentage=25
-            )
             
             logger.info(f"Submitted job {job_id} with Celery task ID {task.id}")
             
@@ -481,7 +474,7 @@ def confirm_uploads(job_id: str):
                 'success': True,
                 'job_id': job_id,
                 'status': DBJobStatus.QUEUED.value,
-                'message': 'Files verified and processing started',
+                'message': 'Job queued for processing',
                 'monitor_url': f'/monitor/{job_id}'
             }), 200
             
@@ -495,8 +488,212 @@ def confirm_uploads(job_id: str):
             return jsonify({'error': f'Failed to queue job: {str(e)}'}), 500
         
     except Exception as e:
-        logger.error(f"Error confirming uploads for job {job_id}: {e}")
+        logger.error(f"Error starting job {job_id}: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+
+# ============================================================================
+# Worker Management Endpoints
+# ============================================================================
+
+@app.route('/api/workers/register', methods=['POST'])
+def register_worker():
+    """
+    Register a new worker with the system.
+    Requires valid registration token for authentication.
+    """
+    try:
+        ensure_managers_initialized()
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        token = data.get('token')
+        if not token:
+            return jsonify({'error': 'Registration token is required'}), 401
+        
+        worker_id = data.get('worker_id')
+        if not worker_id:
+            return jsonify({'error': 'worker_id is required'}), 400
+        
+        facility = data.get('facility', 'default')
+        capabilities = data.get('capabilities', {})
+        metadata = data.get('metadata', {})
+        
+        try:
+            result = worker_registry.register_worker(
+                token=token,
+                worker_id=worker_id,
+                facility=facility,
+                capabilities=capabilities,
+                metadata=metadata
+            )
+            
+            logger.info(f"Worker registered: {worker_id} at {facility}")
+            return jsonify(result), 200
+            
+        except PermissionError as e:
+            logger.warning(f"Invalid token for worker registration: {worker_id}")
+            return jsonify({'error': 'Invalid registration token'}), 401
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+            
+    except Exception as e:
+        logger.error(f"Error registering worker: {e}")
+        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
+
+
+@app.route('/api/workers/heartbeat', methods=['POST'])
+def worker_heartbeat():
+    """
+    Update worker heartbeat to indicate it's still alive.
+    """
+    try:
+        ensure_managers_initialized()
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        worker_id = data.get('worker_id')
+        if not worker_id:
+            return jsonify({'error': 'worker_id is required'}), 400
+        
+        current_job = data.get('current_job')
+        status = data.get('status', 'active')
+        
+        success = worker_registry.heartbeat(
+            worker_id=worker_id,
+            current_job=current_job,
+            status=status
+        )
+        
+        if success:
+            return jsonify({'success': True}), 200
+        else:
+            return jsonify({'error': 'Worker not found'}), 404
+            
+    except Exception as e:
+        logger.error(f"Error processing heartbeat: {e}")
+        return jsonify({'error': f'Heartbeat failed: {str(e)}'}), 500
+
+
+@app.route('/api/workers', methods=['GET'])
+def list_workers():
+    """
+    List all registered workers.
+    Query params: active_only=true to show only active workers
+    """
+    try:
+        ensure_managers_initialized()
+        
+        active_only = request.args.get('active_only', 'false').lower() == 'true'
+        
+        if active_only:
+            workers = worker_registry.get_active_workers()
+        else:
+            workers = worker_registry.get_all_workers()
+        
+        stats = worker_registry.get_registry_stats()
+        
+        return jsonify({
+            'success': True,
+            'workers': workers,
+            'stats': stats
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error listing workers: {e}")
+        return jsonify({'error': f'Failed to list workers: {str(e)}'}), 500
+
+
+@app.route('/api/workers/<worker_id>', methods=['GET'])
+def get_worker(worker_id: str):
+    """Get information about a specific worker."""
+    try:
+        ensure_managers_initialized()
+        
+        worker = worker_registry.get_worker(worker_id)
+        if not worker:
+            return jsonify({'error': 'Worker not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'worker': worker
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting worker {worker_id}: {e}")
+        return jsonify({'error': f'Failed to get worker: {str(e)}'}), 500
+
+
+@app.route('/api/workers/<worker_id>', methods=['DELETE'])
+def deregister_worker(worker_id: str):
+    """Remove a worker from the registry."""
+    try:
+        ensure_managers_initialized()
+        
+        # Optionally require admin token for deregistration
+        # For now, allow any authenticated request
+        
+        success = worker_registry.deregister_worker(worker_id)
+        
+        if success:
+            logger.info(f"Worker deregistered: {worker_id}")
+            return jsonify({
+                'success': True,
+                'message': f'Worker {worker_id} deregistered'
+            }), 200
+        else:
+            return jsonify({'error': 'Worker not found'}), 404
+            
+    except Exception as e:
+        logger.error(f"Error deregistering worker {worker_id}: {e}")
+        return jsonify({'error': f'Failed to deregister worker: {str(e)}'}), 500
+
+
+@app.route('/api/workers/generate-token', methods=['POST'])
+def generate_worker_token():
+    """
+    Generate a new worker registration token.
+    This should be protected by admin authentication in production.
+    """
+    try:
+        # In production, this should require admin authentication
+        # For now, we just generate a new token
+        token = generate_registration_token()
+        
+        logger.info("Generated new worker registration token")
+        
+        return jsonify({
+            'success': True,
+            'token': token,
+            'message': 'Set this as WORKER_REGISTRATION_TOKEN environment variable'
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generating token: {e}")
+        return jsonify({'error': f'Failed to generate token: {str(e)}'}), 500
+
+
+@app.route('/api/storage/stats', methods=['GET'])
+def get_storage_stats():
+    """Get storage statistics."""
+    try:
+        ensure_managers_initialized()
+        
+        stats = storage_manager.get_storage_stats()
+        
+        return jsonify({
+            'success': True,
+            **stats
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting storage stats: {e}")
+        return jsonify({'error': f'Failed to get storage stats: {str(e)}'}), 500
+
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
@@ -786,20 +983,103 @@ def get_job_logs(job_id):
         }), 500
 
 
+@app.route('/api/jobs/<job_id>/download', methods=['GET'])
+def download_job_results(job_id):
+    """
+    Download complete job results as a compressed tar.gz archive.
+    
+    Returns:
+        - tar.gz file containing all output files from the job
+        - 404 if job not found or results not available
+        - 500 on error
+    """
+    ensure_managers_initialized()
+    
+    try:
+        from flask import send_file
+        import tarfile
+        import tempfile
+        import shutil
+        
+        # Get job from database
+        job = database_manager.get_job(job_id)
+        if not job:
+            return jsonify({
+                'success': False,
+                'error': f'Job {job_id} not found'
+            }), 404
+        
+        # Check if job is completed
+        if job.status != JobStatus.COMPLETED.value:
+            return jsonify({
+                'success': False,
+                'error': f'Job {job_id} is not completed yet (status: {job.status})'
+            }), 400
+        
+        # Get output directory from local storage
+        output_dir = storage_manager.get_output_directory(job_id)
+        
+        # Check if output directory exists
+        if not os.path.exists(output_dir):
+            logger.error(f"Output directory not found for job {job_id}: {output_dir}")
+            return jsonify({
+                'success': False,
+                'error': 'Results not found. Output directory may have been cleaned up.'
+            }), 404
+        
+        # Create temporary tar.gz file
+        temp_tar_path = tempfile.mktemp(suffix='.tar.gz')
+        
+        try:
+            logger.info(f"Creating tar.gz archive for job {job_id} from {output_dir}")
+            
+            # Create tar.gz archive
+            with tarfile.open(temp_tar_path, 'w:gz') as tar:
+                # Add all files from output directory
+                tar.add(output_dir, arcname=f'grinn-results-{job_id}')
+            
+            # Get file size for logging
+            file_size_mb = os.path.getsize(temp_tar_path) / (1024 * 1024)
+            logger.info(f"Created tar.gz archive for job {job_id}: {file_size_mb:.2f} MB")
+            
+            # Send file to user
+            return send_file(
+                temp_tar_path,
+                mimetype='application/gzip',
+                as_attachment=True,
+                download_name=f'grinn-results-{job_id}.tar.gz'
+            )
+            
+        except Exception as e:
+            # Clean up temp file on error
+            if os.path.exists(temp_tar_path):
+                try:
+                    os.remove(temp_tar_path)
+                except:
+                    pass
+            raise e
+        
+    except Exception as e:
+        logger.error(f"Error downloading results for job {job_id}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 if __name__ == '__main__':
     # Initialize managers
     if not initialize_managers():
         logger.error("Failed to initialize managers, exiting")
         exit(1)
     
-    # Skip GCS validation in development mode
-    development_mode = os.getenv('DEVELOPMENT_MODE', 'false').lower() == 'true'
-    if development_mode:
-        config.validate(skip_gcs_validation=True)
-    else:
-        config.validate()
+    # Validate configuration
+    config.validate()
     
     logger.info(f"Starting Backend API server on {config.backend_host}:{config.backend_port}")
+    logger.info(f"Storage path: {config.storage_path}")
+    logger.info(f"Job file retention: {config.job_file_retention_hours} hours")
+    
     app.run(
         host=config.backend_host,
         port=config.backend_port,

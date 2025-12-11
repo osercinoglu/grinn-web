@@ -15,31 +15,29 @@ services:
       - REDIS_DB=0
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       
-      # Google Cloud Storage configuration
-      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
-      - GCS_CREDENTIALS_PATH=/app/secrets/gcs-credentials.json
+      # Local storage configuration (NFS mount from frontend)
+      - STORAGE_PATH=/data/grinn-jobs
       
-      # Worker identification
+      # Worker registration (token-based authentication)
+      - WORKER_REGISTRATION_TOKEN=${WORKER_REGISTRATION_TOKEN}
       - WORKER_FACILITY=${WORKER_FACILITY:-facility-1}
       - WORKER_ID=${HOSTNAME}
+      
+      # Job file retention
+      - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
       
       # gRINN Docker image for computational jobs
       - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
       - DOCKER_TIMEOUT=7200  # 2 hours for long computations
       
-      # Development mode (false for production)
-      - DEVELOPMENT_MODE=false
-      
     volumes:
-      # GCS credentials for accessing Google Cloud Storage
-      - ./secrets:/app/secrets:ro
+      # NFS mount for shared storage (configure in /etc/fstab or as NFS volume)
+      # For single-host: use local volume
+      # For multi-host: mount NFS from frontend server
+      - ${NFS_STORAGE_PATH:-/data/grinn-jobs}:/data/grinn-jobs
       
       # Docker socket for running gRINN containers
       - /var/run/docker.sock:/var/run/docker.sock
-      
-      # Temporary storage for job processing
-      - worker_temp:/tmp/grinn-jobs
       
       # Worker logs
       - worker_logs:/app/logs
@@ -69,8 +67,6 @@ services:
     #   - grinn-frontend
 
 volumes:
-  worker_temp:
-    driver: local
   worker_logs:
     driver: local
 
