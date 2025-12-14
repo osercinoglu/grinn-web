@@ -3,7 +3,7 @@ Data models and schemas for gRINN Web Service.
 Defines job structure, validation, and data transfer objects.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional, Dict, Any
@@ -58,19 +58,27 @@ class JobParameters:
     source_sel: Optional[str] = None  # Source residue selection
     target_sel: Optional[str] = None  # Target residue selection
     
+    # Force field for ensemble mode (topology recreation)
+    force_field: Optional[str] = None  # e.g., 'amber99sb-ildn', 'charmm27', etc.
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
             "skip_frames": self.skip_frames,
             "initpairfilter_cutoff": self.initpairfilter_cutoff,
             "source_sel": self.source_sel,
-            "target_sel": self.target_sel
+            "target_sel": self.target_sel,
+            "force_field": self.force_field
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "JobParameters":
-        """Create parameters from dictionary."""
-        return cls(**data)
+        """Create parameters from dictionary, filtering unknown keys."""
+        # Get valid field names from the dataclass
+        valid_fields = {f.name for f in fields(cls)}
+        # Filter to only valid fields
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered_data)
 
 @dataclass 
 class Job:

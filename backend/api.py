@@ -227,7 +227,11 @@ def cancel_job(job_id: str):
 
 @app.route('/api/jobs', methods=['GET'])
 def get_jobs():
-    """Get all jobs with optional status filtering. Private jobs are excluded from public queue."""
+    """Get all jobs with optional status filtering.
+
+    Private jobs are included for visibility (queue health), but identifying details
+    such as job_id are redacted.
+    """
     try:
         ensure_managers_initialized()
         status_filter = request.args.get('status')
@@ -236,9 +240,10 @@ def get_jobs():
         
         with database_manager.get_session() as session:
             query = session.query(JobModel)
-            
-            # Filter out private jobs from public queue
-            query = query.filter(JobModel.is_private == False)
+
+            # NOTE: We intentionally include private jobs so the public queue reflects
+            # whether the server is busy/responsive. Identifying details are redacted
+            # in the response below.
             
             # Apply status filter if provided
             if status_filter and status_filter != 'all':
@@ -251,9 +256,36 @@ def get_jobs():
             query = query.offset(offset).limit(limit)
             
             jobs = query.all()
-            
-            # Convert to dict format
-            jobs_data = [job.to_dict() for job in jobs]
+
+            # Convert to dict format, redacting private job identifiers.
+            jobs_data = []
+            for job in jobs:
+                if job.is_private:
+                    jobs_data.append({
+                        'job_id': None,
+                        'job_name': 'Private job',
+                        'description': None,
+                        'user_email': None,
+                        'is_private': True,
+                        'status': job.status,
+                        'created_at': job.created_at.isoformat() if job.created_at else None,
+                        'started_at': None,
+                        'completed_at': None,
+                        'progress_percentage': job.progress_percentage,
+                        'current_step': job.current_step,
+                        'error_message': None,
+                        'parameters': None,
+                        'input_files': None,
+                        'results_path': None,
+                        'results_gcs_path': None,
+                        'worker_id': None,
+                        'worker_host': None,
+                        'processing_time_seconds': None,
+                        'memory_usage_mb': None,
+                        'cpu_usage_percent': None,
+                    })
+                else:
+                    jobs_data.append(job.to_dict())
         
         return jsonify({
             'success': True,
@@ -383,7 +415,40 @@ def upload_job_file(job_id: str):
             return jsonify({'error': 'No filename provided'}), 400
         
         filename = file.filename
+        
+        # Server-side file size validation (configurable per-file type)
+        content_length = request.content_length
+
+        lower_name = filename.lower()
+        is_trajectory = lower_name.endswith('.xtc') or lower_name.endswith('.trr')
+        max_file_size_mb = config.max_trajectory_file_size_mb if is_trajectory else config.max_other_file_size_mb
+        max_file_size = max_file_size_mb * 1024 * 1024
+
+        if content_length and content_length > max_file_size:
+            logger.warning(
+                f"Rejected file {filename}: Content-Length {content_length} exceeds {max_file_size_mb}MB limit"
+            )
+            return jsonify({
+                'error': (
+                    f"File too large. Maximum allowed size for {'trajectory' if is_trajectory else 'other'} files is "
+                    f"{max_file_size_mb}MB. Your file: {content_length / 1024 / 1024:.1f}MB"
+                )
+            }), 413
+        
         content = file.read()
+        file_size = len(content)
+        
+        # Double-check actual content size
+        if file_size > max_file_size:
+            logger.warning(
+                f"Rejected file {filename}: Actual size {file_size} exceeds {max_file_size_mb}MB limit"
+            )
+            return jsonify({
+                'error': (
+                    f"File too large. Maximum allowed size for {'trajectory' if is_trajectory else 'other'} files is "
+                    f"{max_file_size_mb}MB. Your file: {file_size / 1024 / 1024:.1f}MB"
+                )
+            }), 413
         
         # Save to local storage
         file_path = storage_manager.upload_file_content(
@@ -869,6 +934,7 @@ def get_job_logs(job_id):
     
     try:
         import docker
+        from collections import deque
         
         # Get tail parameter (default 100, max 1000)
         tail = request.args.get('tail', '100')
@@ -959,6 +1025,19 @@ def get_job_logs(job_id):
         
         # If still no logs, check job status for error messages or current step
         if not logs_text or logs_text.strip() == "":
+            # If preflight container was removed, attempt to return persisted preflight logs.
+            try:
+                output_dir = storage_manager.get_output_directory(job_id)
+                preflight_log_path = os.path.join(output_dir, 'preflight.log')
+                if os.path.exists(preflight_log_path) and os.path.getsize(preflight_log_path) > 0:
+                    last_lines = deque(maxlen=tail)
+                    with open(preflight_log_path, 'r', encoding='utf-8', errors='replace') as f:
+                        for line in f:
+                            last_lines.append(line)
+                    logs_text = "".join(last_lines)
+            except Exception as e:
+                logger.warning(f"Could not read preflight.log for job {job_id}: {e}")
+
             job = database_manager.get_job(job_id)
             if job and job.error_message:
                 logs_text = f"=== Job Error ===\n{job.error_message}\n\n=== Container Status ===\nContainer not found or no logs available."

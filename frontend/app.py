@@ -30,6 +30,57 @@ logger = logging.getLogger(__name__)
 # Initialize config
 config = get_config()
 
+# Temporary upload directory for server-side file storage
+import uuid
+import shutil
+import secrets
+TEMP_UPLOAD_DIR = os.path.join(config.storage_path, 'temp_uploads')
+os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
+
+def save_temp_file(content_string: str, filename: str, session_id: str) -> str:
+    """Save uploaded file to temporary storage and return the temp file ID."""
+    # Create session directory
+    session_dir = os.path.join(TEMP_UPLOAD_DIR, session_id)
+    os.makedirs(session_dir, exist_ok=True)
+    
+    # Generate unique file ID
+    file_id = f"{uuid.uuid4().hex[:8]}_{filename}"
+    file_path = os.path.join(session_dir, file_id)
+    
+    # Decode and save file
+    file_content = base64.b64decode(content_string)
+    with open(file_path, 'wb') as f:
+        f.write(file_content)
+    
+    logger.info(f"Saved temp file: {file_path} ({len(file_content)} bytes)")
+    return file_id
+
+def get_temp_file_path(file_id: str, session_id: str) -> str:
+    """Get the full path to a temporary file."""
+    return os.path.join(TEMP_UPLOAD_DIR, session_id, file_id)
+
+def delete_temp_file(file_id: str, session_id: str) -> bool:
+    """Delete a temporary file."""
+    file_path = get_temp_file_path(file_id, session_id)
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Deleted temp file: {file_path}")
+            return True
+    except Exception as e:
+        logger.error(f"Error deleting temp file {file_path}: {e}")
+    return False
+
+def cleanup_session_files(session_id: str):
+    """Remove all temporary files for a session."""
+    session_dir = os.path.join(TEMP_UPLOAD_DIR, session_id)
+    try:
+        if os.path.exists(session_dir):
+            shutil.rmtree(session_dir)
+            logger.info(f"Cleaned up session directory: {session_dir}")
+    except Exception as e:
+        logger.error(f"Error cleaning up session {session_id}: {e}")
+
 # Initialize Dash app
 app = Dash(__name__, 
           external_stylesheets=[
@@ -379,7 +430,444 @@ app.index_string = '''
             .form-group {
                 margin-bottom: 15px;
             }
+            
+            /* Upload progress animation */
+            @keyframes pulse {
+                0% { opacity: 0.6; }
+                50% { opacity: 1; }
+                100% { opacity: 0.6; }
+            }
+            .upload-processing {
+                animation: pulse 1.5s ease-in-out infinite;
+            }
+            
+            /* Upload zone hover effect */
+            .upload-zone:hover {
+                background-color: #e8f5e9 !important;
+                border-color: #5A7A60 !important;
+            }
+            
+            /* File row removal animation */
+            .file-table-row.removing {
+                opacity: 0.5;
+                background-color: #fff3cd !important;
+                pointer-events: none;
+            }
+            .file-table-row.removing .remove-file-btn {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+            .file-table-row.removed {
+                opacity: 0;
+                height: 0;
+                padding: 0 !important;
+                margin: 0;
+                overflow: hidden;
+                border: none !important;
+            }
+            
+            /* Spinner animation for remove button */
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+            .fa-spinner {
+                animation: spin 1s linear infinite;
+            }
         </style>
+        <script>
+            // File Upload Handler - validates size BEFORE reading files
+            (function() {
+                const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024; // 10MB
+
+                function getLimitsFromDom() {
+                    const el = document.getElementById('global-limits-config');
+                    const maxTrajectoryMb = el && el.dataset && el.dataset.maxTrajectoryMb ? parseInt(el.dataset.maxTrajectoryMb, 10) : 100;
+                    const maxOtherMb = el && el.dataset && el.dataset.maxOtherMb ? parseInt(el.dataset.maxOtherMb, 10) : 10;
+                    const maxFramesRaw = el && el.dataset ? el.dataset.maxFrames : '';
+                    return {
+                        maxTrajectoryMb: Number.isFinite(maxTrajectoryMb) && maxTrajectoryMb > 0 ? maxTrajectoryMb : 100,
+                        maxOtherMb: Number.isFinite(maxOtherMb) && maxOtherMb > 0 ? maxOtherMb : 10,
+                        maxFrames: maxFramesRaw
+                    };
+                }
+
+                function getFileLimitMb(filename) {
+                    const limits = getLimitsFromDom();
+                    const name = (filename || '').toLowerCase();
+                    const isTrajectory = name.endsWith('.xtc') || name.endsWith('.trr');
+                    return isTrajectory ? limits.maxTrajectoryMb : limits.maxOtherMb;
+                }
+
+                function getFileKindLabel(filename) {
+                    const name = (filename || '').toLowerCase();
+                    return (name.endsWith('.xtc') || name.endsWith('.trr')) ? 'trajectory' : 'other';
+                }
+                
+                function showRejectionWarning(rejectedFiles) {
+                    const warningDiv = document.getElementById('file-rejection-warning');
+                    if (warningDiv && rejectedFiles.length > 0) {
+                        const fileList = rejectedFiles.map(f => 
+                            '<li style="margin: 4px 0;">' +
+                            '<strong>' + f.name + '</strong> ' +
+                            '<span style="color: #721c24;">(' + (f.size / 1024 / 1024).toFixed(1) + ' MB)</span> ' +
+                            '<span style="color: #856404;">— limit: ' + f.limitMb + 'MB (' + f.kind + ')</span>' +
+                            '</li>'
+                        ).join('');
+                        warningDiv.innerHTML = 
+                            '<div class="alert alert-danger" style="display: flex; align-items: flex-start; margin: 15px 0; padding: 15px; border: 2px solid #f5c6cb; border-radius: 8px;">' +
+                            '<i class="fas fa-exclamation-circle" style="margin-right: 12px; color: #dc3545; font-size: 1.5rem; flex-shrink: 0;"></i>' +
+                            '<div style="flex: 1;">' +
+                            '<div style="font-size: 1rem; font-weight: 600; margin-bottom: 8px; color: #721c24;">⚠️ File(s) rejected - exceeds size limit</div>' +
+                            '<ul style="margin: 0 0 10px 0; padding-left: 20px; font-size: 0.9rem;">' + fileList + '</ul>' +
+                            '<div style="font-size: 0.85rem; color: #856404; background: #fff3cd; padding: 8px 12px; border-radius: 4px; border: 1px solid #ffeeba;">' +
+                            '<i class="fas fa-lightbulb" style="margin-right: 6px;"></i>' +
+                            '<strong>Tip:</strong> Extract fewer frames from your trajectory, or split it into smaller parts using GROMACS: ' +
+                            '<code style="background: #f8f9fa; padding: 2px 6px; border-radius: 3px;">gmx trjconv -skip 10</code>' +
+                            '</div>' +
+                            '</div>' +
+                            '</div>';
+                    }
+                }
+                
+                function clearRejectionWarning() {
+                    const warningDiv = document.getElementById('file-rejection-warning');
+                    if (warningDiv) {
+                        warningDiv.innerHTML = '';
+                    }
+                }
+                
+                function showProgress(fileCount, totalSize) {
+                    const progressContainer = document.getElementById('upload-progress-container');
+                    const progressText = document.getElementById('upload-progress-text');
+                    if (progressContainer && progressText) {
+                        progressContainer.style.display = 'block';
+                        progressContainer.style.marginTop = '10px';
+                        progressContainer.style.padding = '10px';
+                        progressContainer.style.backgroundColor = '#e8f5e9';
+                        progressContainer.style.borderRadius = '5px';
+                        progressContainer.style.border = '1px solid #c8e6c9';
+                        const sizeMB = (totalSize / 1024 / 1024).toFixed(1);
+                        progressText.textContent = 'Reading ' + fileCount + ' file(s) (' + sizeMB + ' MB)... Please wait.';
+                    }
+                }
+                
+                function hideProgress() {
+                    const progressContainer = document.getElementById('upload-progress-container');
+                    if (progressContainer) {
+                        progressContainer.style.display = 'none';
+                    }
+                }
+                
+                function readFileAsDataURL(file) {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve({
+                            name: file.name,
+                            content: reader.result,
+                            lastModified: file.lastModified
+                        });
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                }
+                
+                async function handleFileSelection(files) {
+                    if (!files || files.length === 0) return;
+                    
+                    const rejectedFiles = [];
+                    const acceptedFiles = [];
+                    let totalSize = 0;
+                    
+                    // First pass: check sizes WITHOUT reading files
+                    for (let i = 0; i < files.length; i++) {
+                        const limitMb = getFileLimitMb(files[i].name);
+                        const limitBytes = limitMb * 1024 * 1024;
+                        if (files[i].size > limitBytes) {
+                            rejectedFiles.push({
+                                name: files[i].name,
+                                size: files[i].size,
+                                limitMb: limitMb,
+                                kind: getFileKindLabel(files[i].name)
+                            });
+                        } else {
+                            acceptedFiles.push(files[i]);
+                            totalSize += files[i].size;
+                        }
+                    }
+                    
+                    // Show rejection warning immediately if any files rejected
+                    if (rejectedFiles.length > 0) {
+                        showRejectionWarning(rejectedFiles);
+                    } else {
+                        clearRejectionWarning();
+                    }
+                    
+                    // If no valid files, stop here
+                    if (acceptedFiles.length === 0) {
+                        return;
+                    }
+                    
+                    // Show progress for large uploads
+                    if (totalSize > LARGE_FILE_THRESHOLD) {
+                        showProgress(acceptedFiles.length, totalSize);
+                    }
+                    
+                    try {
+                        // Now read only the valid files
+                        const fileDataPromises = acceptedFiles.map(f => readFileAsDataURL(f));
+                        const fileDataArray = await Promise.all(fileDataPromises);
+                        
+                        // Trigger Dash upload by updating the dcc.Upload component
+                        // We need to programmatically set the contents
+                        const contents = fileDataArray.map(f => f.content);
+                        const filenames = fileDataArray.map(f => f.name);
+                        const lastModified = fileDataArray.map(f => f.lastModified);
+                        
+                        // Find and trigger the Dash upload component
+                        // Dash components store their props in window.dash_clientside
+                        if (window.dash_clientside && window.dash_clientside.set_props) {
+                            window.dash_clientside.set_props('upload-files', {
+                                contents: contents.length === 1 ? contents[0] : contents,
+                                filename: filenames.length === 1 ? filenames[0] : filenames,
+                                last_modified: lastModified.length === 1 ? lastModified[0] : lastModified
+                            });
+                        } else {
+                            // Fallback: dispatch custom event that a clientside callback can listen to
+                            const store = document.getElementById('validated-files-store');
+                            if (store) {
+                                // Store the data for the clientside callback
+                                window._validatedFiles = {
+                                    contents: contents,
+                                    filenames: filenames,
+                                    lastModified: lastModified
+                                };
+                                // Trigger a change
+                                store.click();
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error reading files:', error);
+                    } finally {
+                        hideProgress();
+                    }
+                }
+                
+                function initFileHandler() {
+                    // Find the dcc.Upload component's container
+                    const uploadContainer = document.getElementById('upload-files');
+                    if (!uploadContainer) {
+                        setTimeout(initFileHandler, 300);
+                        return;
+                    }
+                    
+                    // Find the actual file input inside the dcc.Upload component
+                    // dcc.Upload creates an input[type=file] inside its div
+                    const fileInput = uploadContainer.querySelector('input[type="file"]');
+                    if (!fileInput) {
+                        // Wait for it to be created
+                        setTimeout(initFileHandler, 300);
+                        return;
+                    }
+                    
+                    // Skip if already initialized
+                    if (fileInput._sizeCheckInitialized) {
+                        return;
+                    }
+                    fileInput._sizeCheckInitialized = true;
+                    
+                    // Create a wrapper function that intercepts file selection
+                    const originalOnChange = fileInput.onchange;
+                    
+                    // Intercept the file input's change event BEFORE dcc.Upload processes it
+                    fileInput.addEventListener('change', function(e) {
+                        const files = e.target.files;
+                        if (!files || files.length === 0) return;
+                        
+                        let hasOversizedFiles = false;
+                        let rejectedFiles = [];
+                        
+                        for (let i = 0; i < files.length; i++) {
+                            const limitMb = getFileLimitMb(files[i].name);
+                            const limitBytes = limitMb * 1024 * 1024;
+                            if (files[i].size > limitBytes) {
+                                hasOversizedFiles = true;
+                                rejectedFiles.push({
+                                    name: files[i].name,
+                                    size: files[i].size,
+                                    limitMb: limitMb,
+                                    kind: getFileKindLabel(files[i].name)
+                                });
+                            }
+                        }
+                        
+                        if (hasOversizedFiles) {
+                            // Show warning
+                            showRejectionWarning(rejectedFiles);
+                            
+                            // IMPORTANT: Prevent dcc.Upload from processing these files
+                            // We stop the event propagation and prevent default
+                            e.stopImmediatePropagation();
+                            e.preventDefault();
+                            
+                            // Clear the input
+                            e.target.value = '';
+                            
+                            return false;
+                        }
+                        
+                        // Show progress for large files
+                        let totalSize = 0;
+                        for (let i = 0; i < files.length; i++) {
+                            totalSize += files[i].size;
+                        }
+                        if (totalSize > LARGE_FILE_THRESHOLD) {
+                            showProgress('Processing files...', totalSize);
+                            // Hide progress after a timeout (actual hide should be in callback)
+                            setTimeout(hideProgress, 10000);
+                        }
+                        
+                        // Let dcc.Upload process accepted files normally
+                    }, true);  // Use capture phase to run before dcc.Upload
+                    
+                    console.log('File upload handler initialized - size validation enabled (interception mode)');
+                }
+                
+                function setupObserverAndDropHandler() {
+                    // Watch for dynamic content
+                    const observer = new MutationObserver(() => {
+                        const uploadContainer = document.getElementById('upload-files');
+                        if (uploadContainer && !window._fileHandlerInitialized) {
+                            const fileInput = uploadContainer.querySelector('input[type="file"]');
+                            if (fileInput && !fileInput._sizeCheckInitialized) {
+                                window._fileHandlerInitialized = true;
+                                initFileHandler();
+                            }
+                        }
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                    
+                    // Also intercept drag and drop on the upload container
+                    document.addEventListener('drop', function(e) {
+                        const uploadContainer = document.getElementById('upload-files');
+                        if (!uploadContainer) return;
+                        
+                        // Check if the drop is on or within the upload container
+                        if (uploadContainer.contains(e.target) || e.target === uploadContainer) {
+                            const files = e.dataTransfer && e.dataTransfer.files;
+                            if (!files || files.length === 0) return;
+                            
+                            let hasOversizedFiles = false;
+                            let rejectedFiles = [];
+                            
+                            for (let i = 0; i < files.length; i++) {
+                                const limitMb = getFileLimitMb(files[i].name);
+                                const limitBytes = limitMb * 1024 * 1024;
+                                if (files[i].size > limitBytes) {
+                                    hasOversizedFiles = true;
+                                    rejectedFiles.push({
+                                        name: files[i].name,
+                                        size: files[i].size,
+                                        limitMb: limitMb,
+                                        kind: getFileKindLabel(files[i].name)
+                                    });
+                                }
+                            }
+                            
+                            if (hasOversizedFiles) {
+                                e.stopImmediatePropagation();
+                                e.preventDefault();
+                                showRejectionWarning(rejectedFiles);
+                            } else {
+                                // Show progress for large files
+                                let totalSize = 0;
+                                for (let i = 0; i < files.length; i++) {
+                                    totalSize += files[i].size;
+                                }
+                                if (totalSize > LARGE_FILE_THRESHOLD) {
+                                    showProgress('Processing files...', totalSize);
+                                    setTimeout(hideProgress, 10000);
+                                }
+                            }
+                        }
+                    }, true);  // Capture phase
+                }
+                
+                // Initialize when page is ready
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        setTimeout(initFileHandler, 200);
+                        setupObserverAndDropHandler();
+                    });
+                } else {
+                    setTimeout(initFileHandler, 200);
+                    setupObserverAndDropHandler();
+                }
+                
+                // Re-initialize after SPA navigation
+                window.addEventListener('load', () => setTimeout(initFileHandler, 500));
+            })();
+            
+            // Immediate visual feedback for file removal
+            (function() {
+                // Use event delegation for dynamically created remove buttons
+                document.addEventListener('click', function(e) {
+                    // Check if the clicked element is a remove button or inside one
+                    const button = e.target.closest('.remove-file-btn');
+                    if (!button) return;
+                    
+                    // Find the parent row
+                    const row = button.closest('.file-table-row');
+                    if (!row) return;
+                    
+                    // Check if already being removed
+                    if (row.classList.contains('removing') || row.classList.contains('removed')) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+
+                    // IMPORTANT: let Dash/React receive this click first.
+                    // If we disable the button in capture phase (or too early), Dash may never
+                    // register the click and n_clicks_timestamp stays None.
+                    setTimeout(function() {
+                        if (!document.contains(button) || !document.contains(row)) return;
+
+                        // Apply immediate visual feedback
+                        row.classList.add('removing');
+
+                        // Change the icon to a spinner
+                        const icon = button.querySelector('i');
+                        if (icon) {
+                            icon.className = 'fas fa-spinner';
+                        }
+
+                        // Disable the button
+                        button.disabled = true;
+                        button.style.cursor = 'not-allowed';
+                    }, 0);
+                    
+                    console.log('File removal initiated - visual feedback applied');
+
+                    // If backend/store update doesn't remove the row within a reasonable time,
+                    // restore the button so the user isn't stuck.
+                    setTimeout(function() {
+                        if (!row || !document.contains(row)) return;
+                        if (!row.classList.contains('removing')) return;
+
+                        row.classList.remove('removing');
+
+                        const icon2 = button.querySelector('i');
+                        if (icon2) {
+                            icon2.className = 'fas fa-trash';
+                        }
+                        button.disabled = false;
+                        button.style.cursor = 'pointer';
+                        console.warn('Remove did not complete in time; UI restored');
+                    }, 15000);
+                }, false);  // Bubble phase: don't interfere with Dash handlers
+            })();
+        </script>
     </head>
     <body>
         {%app_entry%}
@@ -394,6 +882,30 @@ app.index_string = '''
 
 # Global variables for job tracking
 current_jobs = {}
+
+# Clientside callback to transfer validated files from JavaScript to dcc.Upload
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        // This callback is triggered when JavaScript stores validated files
+        if (window._validatedFiles) {
+            const files = window._validatedFiles;
+            window._validatedFiles = null;  // Clear after use
+            return [
+                files.contents.length === 1 ? files.contents[0] : files.contents,
+                files.filenames.length === 1 ? files.filenames[0] : files.filenames,
+                files.lastModified.length === 1 ? files.lastModified[0] : files.lastModified
+            ];
+        }
+        return [window.dash_clientside.no_update, window.dash_clientside.no_update, window.dash_clientside.no_update];
+    }
+    """,
+    [Output('upload-files', 'contents'),
+     Output('upload-files', 'filename'),
+     Output('upload-files', 'last_modified')],
+    [Input('validated-files-store', 'n_clicks')],
+    prevent_initial_call=True
+)
 
 def create_header():
     """Create the main header component."""
@@ -477,17 +989,35 @@ def create_file_upload_section():
             # Left: Mode instructions
             html.Div(id='mode-specific-instructions', style={'flex': '1', 'paddingRight': '15px'}),
             
-            # Right: Upload zone
+            # Right: Upload zone with custom file input for size validation
             html.Div([
                 html.Div([
+                    # Visual upload zone - clickable area
                     html.Div([
-                        html.I(className="fas fa-cloud-upload-alt", style={'fontSize': '1.5rem', 'color': '#7C9885', 'marginBottom': '8px'}),
-                        html.Div("Drop files or click to browse", 
-                                style={'fontSize': '0.9rem', 'fontWeight': '500', 'color': '#5A7A60'}),
-                        html.Div("Tip: For force field folders, upload all files individually or as a ZIP", 
-                                style={'fontSize': '0.75rem', 'color': '#8A9A8A', 'marginTop': '4px', 'fontStyle': 'italic'})
-                    ], className="upload-zone", style={'padding': '20px', 'textAlign': 'center'}),
+                        html.Div([
+                            html.I(className="fas fa-cloud-upload-alt", style={'fontSize': '1.5rem', 'color': '#7C9885', 'marginBottom': '8px'}),
+                            html.Div("Drop files or click to browse", 
+                                    style={'fontSize': '0.9rem', 'fontWeight': '500', 'color': '#5A7A60'}),
+                            html.Div(
+                                f"Trajectory ≤ {config.max_trajectory_file_size_mb}MB • Other ≤ {config.max_other_file_size_mb}MB"
+                                + (f" • Max frames/models: {config.max_frames}" if getattr(config, 'max_frames', None) else " • Max frames/models: no limit"),
+                                
+                                    style={'fontSize': '0.75rem', 'color': '#8A9A8A', 'marginTop': '4px', 'fontStyle': 'italic'})
+                        ], className="upload-zone", style={'padding': '20px', 'textAlign': 'center', 'cursor': 'pointer'}),
+                    ], id='upload-click-zone', style={'cursor': 'pointer'}),
+
+                    # Global limits exposed to browser JS via data-* attributes
+                    html.Div(
+                        id='global-limits-config',
+                        style={'display': 'none'},
+                        **{
+                            'data-max-trajectory-mb': str(config.max_trajectory_file_size_mb),
+                            'data-max-other-mb': str(config.max_other_file_size_mb),
+                            'data-max-frames': '' if getattr(config, 'max_frames', None) is None else str(config.max_frames),
+                        }
+                    ),
                     
+                    # Hidden dcc.Upload - we'll use this but intercept via JavaScript
                     dcc.Upload(
                         id='upload-files',
                         children=html.Div([]),
@@ -498,10 +1028,24 @@ def create_file_upload_section():
                             'width': '100%',
                             'height': '100%',
                             'opacity': 0,
-                            'cursor': 'pointer'
+                            'cursor': 'pointer',
+                            'zIndex': 10
                         },
                         multiple=True
-                    )
+                    ),
+                    # Store for files pending validation
+                    dcc.Store(id='validated-files-store', data=[]),
+                    # Store for tracking rejected files  
+                    dcc.Store(id='rejected-files-store', data=[]),
+                    # Upload progress indicator (shown for large files)
+                    html.Div(id='upload-progress-container', style={'display': 'none'}, children=[
+                        html.Div([
+                            html.I(className="fas fa-spinner fa-spin", style={'marginRight': '8px'}),
+                            html.Span(id='upload-progress-text', children='Uploading...'),
+                        ], style={'textAlign': 'center', 'padding': '10px', 'color': '#5A7A60'}),
+                        dbc.Progress(id='upload-progress-bar', value=0, striped=True, animated=True, 
+                                    style={'height': '8px', 'marginTop': '5px'})
+                    ])
                 ], className="upload-panel", style={'position': 'relative'})
             ], style={'flex': '1', 'paddingLeft': '15px'})
             
@@ -509,6 +1053,9 @@ def create_file_upload_section():
         
         # Hidden div for callback compatibility
         html.Div(id="file-requirements-status", style={'display': 'none'}),
+        
+        # File rejection warning (for oversized files)
+        html.Div(id="file-rejection-warning"),
         
         # File list and validation messages
         html.Div(id="file-list-display", style={'display': 'none'}),
@@ -656,7 +1203,7 @@ def create_submit_section():
                         ),
                         html.Div([
                             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '5px', 'color': '#FFA500', 'fontSize': '0.8rem'}),
-                            html.Small("Private jobs will NOT appear in the public job queue. Bookmark the monitoring page to access results later!", 
+                            html.Small("Private jobs appear in the job queue as 'Private job'. Bookmark the monitoring page to access details later!", 
                                       style={'color': '#8A9A8A', 'fontSize': '0.8rem'})
                         ], style={'marginTop': '5px', 'display': 'flex', 'alignItems': 'flex-start'})
                     ], className="form-group")
@@ -935,9 +1482,13 @@ app.layout = html.Div([
 def display_page(pathname):
     """Handle URL routing for different pages."""
     if pathname is None or pathname == '/':
+        # Generate a unique session ID for this page load
+        session_id = secrets.token_hex(16)
+        
         # Main page
         return html.Div([
             dcc.Store(id='uploaded-files-store', data=[]),
+            dcc.Store(id='session-id-store', data=session_id),  # Session ID for temp file storage
             # Hidden force field selector - always present for callback consistency
             html.Div([
                 dcc.Dropdown(
@@ -1033,6 +1584,11 @@ def update_mode_instructions(mode):
                     html.I(className="fas fa-info-circle", style={'marginRight': '5px'}),
                     "Topology auto-generated"
                 ], style={'fontSize': '0.8rem', 'color': '#666', 'marginTop': '8px'})
+                ,
+                html.Div([
+                    html.I(className="fas fa-ruler-combined", style={'marginRight': '5px'}),
+                    (f"Max frames/models: {config.max_frames}" if getattr(config, 'max_frames', None) else "Max frames/models: no limit")
+                ], style={'fontSize': '0.8rem', 'color': '#666', 'marginTop': '6px'})
             ])
         ], style={'padding': '12px', 'backgroundColor': '#f8f9fa', 'borderRadius': '5px', 'border': '1px solid #dee2e6'})
         
@@ -1044,10 +1600,15 @@ def update_mode_instructions(mode):
                     html.Strong("Required: "),
                     html.Ul([
                         html.Li("Structure (.pdb/.gro)", style={'margin': '2px 0'}),
-                        html.Li("Trajectory (.xtc/.trr, max 100MB)", style={'margin': '2px 0'}),
+                        html.Li(f"Trajectory (.xtc/.trr, max {config.max_trajectory_file_size_mb}MB)", style={'margin': '2px 0'}),
                         html.Li("Topology (.tpr/.top)", style={'margin': '2px 0'})
                     ], style={'fontSize': '0.85rem', 'marginTop': '5px', 'marginBottom': '5px', 'paddingLeft': '20px'})
                 ], style={'fontSize': '0.9rem', 'marginBottom': '5px'}),
+
+                html.Div([
+                    html.Strong("Limits: "),
+                    (f"Max frames: {config.max_frames}" if getattr(config, 'max_frames', None) else "Max frames: no limit")
+                ], style={'fontSize': '0.85rem', 'color': '#666', 'marginBottom': '5px'}),
                 
                 html.Div([
                     html.Strong("Optional: "),
@@ -1075,15 +1636,37 @@ def sync_force_field_selector(display_value):
      Output('uploaded-files-store', 'data'),
      Output('submit-job-btn', 'disabled'),
      Output('submit-status-message', 'children'),
-     Output('submit-status-message', 'style')],
+     Output('submit-status-message', 'style'),
+     Output('upload-progress-container', 'style'),
+     Output('upload-progress-text', 'children'),
+     Output('upload-progress-bar', 'value'),
+     Output('file-rejection-warning', 'children')],
     [Input('upload-files', 'contents'),
      Input('input-mode-selector', 'value')],
     [State('upload-files', 'filename'),
-     State('uploaded-files-store', 'data')]
+     State('uploaded-files-store', 'data'),
+     State('session-id-store', 'data')]
 )
-def handle_file_upload(contents, input_mode, filenames, stored_files):
-    """Handle file upload and validation."""
+def handle_file_upload(contents, input_mode, filenames, stored_files, session_id):
+    """Handle file upload and validation. Files are stored server-side, only metadata in browser."""
+    # Default progress style (hidden)
+    progress_hidden = {'display': 'none'}
+    progress_shown = {'display': 'block', 'marginTop': '10px', 'padding': '10px', 'backgroundColor': '#f8f9fa', 'borderRadius': '5px'}
+
+    # Important: `upload-files.contents` can be programmatically cleared (e.g., after a remove click)
+    # to allow re-uploading the same file. That clear triggers this callback, and the `stored_files`
+    # State arriving here can be stale (race with the remove callback). If we write it back out,
+    # we can effectively undo the removal.
+    ctx = callback_context
+    
     if not contents:
+        # If there are already stored files, do not touch outputs here.
+        # The UI should be driven by `uploaded-files-store` and updated via
+        # `update_file_display_on_removal`.
+        if stored_files:
+            return (no_update, no_update, no_update, no_update, no_update, no_update,
+                    no_update, no_update, no_update, no_update, no_update)
+
         return [], {'display': 'none'}, [], stored_files, True, [
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
             "Upload required files to enable analysis"
@@ -1095,19 +1678,38 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
             'backgroundColor': '#f8f9fa',
             'borderRadius': '5px',
             'border': '1px dashed #dee2e6'
-        }
+        }, progress_hidden, '', 0, []  # Empty rejection warning
     
     if not isinstance(contents, list):
         contents = [contents]
         filenames = [filenames]
     
-    files = stored_files.copy()
+    # Use default session ID if not available
+    if not session_id:
+        session_id = secrets.token_hex(16)
+    
+    files = stored_files.copy() if stored_files else []
     validation_messages = []
+    rejected_files = []  # Track files rejected for size
+    # Safety cap to avoid excessive memory usage during base64 decode (derived from configured limits)
+    hard_limit_mb = max(config.max_trajectory_file_size_mb, config.max_other_file_size_mb)
+    HARD_FILE_SIZE_LIMIT = hard_limit_mb * 1024 * 1024
     
     for content, filename in zip(contents, filenames):
         # Decode file content
         content_type, content_string = content.split(',')
         file_size = len(base64.b64decode(content_string))
+        
+        # First check: hard safety cap (should normally match your configured limits)
+        if file_size > HARD_FILE_SIZE_LIMIT:
+            rejected_files.append({
+                'filename': filename,
+                'size_mb': file_size / 1024 / 1024
+            })
+            logger.warning(
+                f"Rejected file {filename}: {file_size/1024/1024:.1f}MB exceeds {hard_limit_mb}MB safety cap"
+            )
+            continue
         
         # Determine file type first
         extension = filename.lower().split('.')[-1] if '.' in filename else ''
@@ -1122,7 +1724,7 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
             )
             continue
         
-        # Validate file size based on type
+        # Validate file size based on type (type-specific limits still apply)
         is_trajectory = extension in ['xtc', 'trr']
         max_size = (config.max_trajectory_file_size_mb if is_trajectory else config.max_other_file_size_mb) * 1024 * 1024
         max_size_label = f"{config.max_trajectory_file_size_mb}MB" if is_trajectory else f"{config.max_other_file_size_mb}MB"
@@ -1136,10 +1738,24 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
             )
             continue
         
-        # Add file to store
+        # Save file to server-side temporary storage
+        try:
+            temp_file_id = save_temp_file(content_string, filename, session_id)
+        except Exception as e:
+            logger.error(f"Failed to save temp file {filename}: {e}")
+            validation_messages.append(
+                html.Div([
+                    html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                    f"Failed to save file {filename}. Please try again."
+                ], className="alert alert-danger")
+            )
+            continue
+        
+        # Store only metadata in browser (NOT the file content!)
         file_data = {
             'filename': filename,
-            'content': content_string,
+            'temp_file_id': temp_file_id,  # Reference to server-side file
+            'session_id': session_id,
             'size_bytes': file_size,
             'file_type': file_type.value,
             'upload_time': datetime.utcnow().isoformat()
@@ -1184,10 +1800,12 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
     
     # Create table rows
     file_list_items = [table_header]
-    for file_data in files:
+    for idx, file_data in enumerate(files):
         size_mb = file_data['size_bytes'] / (1024 * 1024)
         file_type = file_data['file_type']
         purpose = get_file_purpose(file_type)
+        # Use temp_file_id as unique key for reliable removal
+        file_key = file_data.get('temp_file_id', f"{file_data['filename']}_{idx}")
         
         file_list_items.append(
             html.Div([
@@ -1210,8 +1828,10 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
                 ),
                 html.Div([
                     html.Button(
-                        html.I(className="fas fa-trash"),
-                        id={'type': 'remove-file', 'index': files.index(file_data)},
+                        html.I(className="fas fa-trash", id={'type': 'remove-icon', 'index': file_key}),
+                        id={'type': 'remove-file', 'index': file_key},
+                        n_clicks=0,
+                        className='remove-file-btn',
                         style={
                             'fontSize': '0.75rem',
                             'padding': '4px 8px',
@@ -1225,13 +1845,13 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
                         title=f"Remove {file_data['filename']}"
                     )
                 ], style={'flex': '0.4', 'display': 'flex', 'justifyContent': 'center'})
-            ], style={
+            ], id={'type': 'file-row', 'index': file_key}, style={
                 'display': 'flex',
                 'alignItems': 'center',
                 'padding': '8px 12px',
                 'borderBottom': '1px solid #e9ecef',
                 'backgroundColor': '#ffffff',
-                'transition': 'background-color 0.2s',
+                'transition': 'all 0.3s ease',
             }, className='file-table-row')
         )
     
@@ -1352,7 +1972,58 @@ def handle_file_upload(contents, input_mode, filenames, stored_files):
         }
     )
     
-    return file_list_container, style, validation_messages, files, submit_disabled, submit_message, submit_style
+    # Calculate total size for progress info
+    total_size_bytes = sum(f.get('size_bytes', 0) for f in files)
+    large_files_exist = any(f.get('size_bytes', 0) > 10 * 1024 * 1024 for f in files)  # > 10MB
+    
+    # Show progress info for large file uploads
+    if large_files_exist:
+        progress_text = f"Processed {len(files)} file(s) ({total_size_bytes / 1024 / 1024:.1f} MB total)"
+    else:
+        progress_text = ""
+    
+    # Hide progress after upload is complete
+    progress_style = {'display': 'none'}
+    
+    # Build rejection warning for files over the configured safety cap
+    rejection_warning = []
+    if rejected_files:
+        rejection_items = [
+            html.Li(f"{rf['filename']} ({rf['size_mb']:.1f} MB)") 
+            for rf in rejected_files
+        ]
+        rejection_warning = html.Div([
+            html.Div([
+                html.I(className="fas fa-ban", style={
+                    'marginRight': '12px', 
+                    'color': '#dc3545', 
+                    'fontSize': '1.5rem',
+                    'marginTop': '2px'
+                }),
+                html.Div([
+                    html.Strong(
+                        f"File(s) rejected - exceeds {hard_limit_mb}MB size cap:",
+                        style={'fontSize': '1rem'}
+                    ),
+                    html.Ul(rejection_items, style={
+                        'margin': '8px 0', 
+                        'paddingLeft': '20px',
+                        'fontSize': '0.95rem'
+                    }),
+                    html.Div([
+                        html.I(className="fas fa-lightbulb", style={'marginRight': '6px', 'color': '#856404'}),
+                        "Tip: Reduce trajectory size by extracting fewer frames or splitting into smaller parts."
+                    ], style={'fontSize': '0.85rem', 'color': '#856404', 'marginTop': '5px'})
+                ])
+            ], style={'display': 'flex', 'alignItems': 'flex-start'})
+        ], className="alert alert-danger", style={
+            'marginBottom': '15px',
+            'padding': '15px',
+            'borderRadius': '8px',
+            'border': '2px solid #f5c6cb'
+        })
+    
+    return file_list_container, style, validation_messages, files, submit_disabled, submit_message, submit_style, progress_style, progress_text, 100, rejection_warning
 
 @app.callback(
     [Output('parameters-content', 'style'),
@@ -1453,10 +2124,12 @@ def update_file_display_on_removal(stored_files, input_mode):
     
     # Create table rows
     file_list_items = [table_header]
-    for file_data in files:
+    for idx, file_data in enumerate(files):
         size_mb = file_data['size_bytes'] / (1024 * 1024)
         file_type = file_data['file_type']
         purpose = get_file_purpose(file_type)
+        # Use temp_file_id as unique key for reliable removal
+        file_key = file_data.get('temp_file_id', f"{file_data['filename']}_{idx}")
         
         file_list_items.append(
             html.Div([
@@ -1479,8 +2152,10 @@ def update_file_display_on_removal(stored_files, input_mode):
                 ),
                 html.Div([
                     html.Button(
-                        html.I(className="fas fa-trash"),
-                        id={'type': 'remove-file', 'index': files.index(file_data)},
+                        html.I(className="fas fa-trash", id={'type': 'remove-icon', 'index': file_key}),
+                        id={'type': 'remove-file', 'index': file_key},
+                        n_clicks=0,
+                        className='remove-file-btn',
                         style={
                             'fontSize': '0.75rem',
                             'padding': '4px 8px',
@@ -1494,13 +2169,13 @@ def update_file_display_on_removal(stored_files, input_mode):
                         title=f"Remove {file_data['filename']}"
                     )
                 ], style={'flex': '0.4', 'display': 'flex', 'justifyContent': 'center'})
-            ], style={
+            ], id={'type': 'file-row', 'index': file_key}, style={
                 'display': 'flex',
                 'alignItems': 'center',
                 'padding': '8px 12px',
                 'borderBottom': '1px solid #e9ecef',
                 'backgroundColor': '#ffffff',
-                'transition': 'background-color 0.2s',
+                'transition': 'all 0.3s ease',
             }, className='file-table-row')
         )
     
@@ -1597,54 +2272,108 @@ def update_file_display_on_removal(stored_files, input_mode):
 # Clear upload component when files are removed to allow re-uploading the same file
 @app.callback(
     Output('upload-files', 'contents', allow_duplicate=True),
-    [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks')],
+    [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks_timestamp')],
     prevent_initial_call=True
 )
-def clear_upload_on_removal(n_clicks):
+def clear_upload_on_removal(n_clicks_timestamp):
     """Clear the upload component when files are removed to allow re-uploading same files."""
-    if any(n_clicks):
-        return None
+    ctx = callback_context
+    # Only clear if an actual click happened (timestamp is a positive number)
+    if ctx.triggered:
+        triggered_value = ctx.triggered[0].get('value')
+        if triggered_value and triggered_value > 0:
+            return None
     return no_update
 
 @app.callback(
     Output('uploaded-files-store', 'data', allow_duplicate=True),
-    [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks')],
-    [State('uploaded-files-store', 'data')],
+    [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks_timestamp')],
+    [State('uploaded-files-store', 'data'),
+     State('session-id-store', 'data')],
     prevent_initial_call=True
 )
-def remove_file(n_clicks, stored_files):
-    """Remove a file from the upload list."""
-    if not any(n_clicks) or not stored_files:
-        return stored_files
+def remove_file(n_clicks_timestamp, stored_files, session_id):
+    """Remove a file from the upload list and delete from server."""
+    logger.info(f"remove_file callback triggered: n_clicks_timestamp={n_clicks_timestamp}, stored_files count={len(stored_files) if stored_files else 0}")
     
-    # Find which button was clicked
+    # Use callback_context to determine what triggered the callback
     ctx = callback_context
-    if not ctx.triggered:
-        return stored_files
     
-    # For pattern-matching callbacks, the prop_id contains the full component ID
-    triggered_id = ctx.triggered[0]['prop_id']
+    # Check if callback was actually triggered by a click
+    if not ctx.triggered:
+        logger.info("No trigger, skipping")
+        return no_update
+    
+    # Get triggered info
+    triggered_prop = ctx.triggered[0]
+    triggered_value = triggered_prop.get('value')
+
+    logger.info(f"Triggered prop: {triggered_prop}")
+
+    # n_clicks_timestamp is 0/-1/None until actually clicked, then becomes a positive epoch-ms
+    if not triggered_value or triggered_value <= 0:
+        logger.info(f"Triggered value {triggered_value} is not a valid click timestamp, skipping")
+        return no_update
+    
+    # Get the triggered_id (pattern-matching dict)
+    triggered_id = ctx.triggered_id
+    logger.info(f"triggered_id: {triggered_id}")
+    
+    # If no triggered_id or it's not a dict (pattern-matching), skip
+    if not triggered_id or not isinstance(triggered_id, dict):
+        logger.info("No valid triggered_id dict, skipping")
+        return no_update
+    
+    # Check if this is actually a remove-file button
+    if triggered_id.get('type') != 'remove-file':
+        logger.info("Not a remove-file button, skipping")
+        return no_update
+    
+    if not stored_files:
+        logger.info("No stored files to remove")
+        return no_update
+    
+    # Get the file key from the triggered button's index
+    file_key_to_remove = triggered_id.get('index')
+    logger.info(f"Looking for file with key: {file_key_to_remove}")
+    
+    if not file_key_to_remove:
+        logger.warning("No file key in triggered_id")
+        return no_update
     
     try:
-        # Extract the JSON part from the prop_id (before the '.n_clicks')
-        button_id_str = triggered_id.split('.')[0]
-        button_data = json.loads(button_id_str)
-        index_to_remove = button_data['index']
+        # Find the file by temp_file_id
+        file_to_remove = None
+        for idx, f in enumerate(stored_files):
+            temp_file_id = f.get('temp_file_id')
+            if temp_file_id and temp_file_id == file_key_to_remove:
+                file_to_remove = f
+                logger.info(f"Found file by temp_file_id: {temp_file_id}")
+                break
         
-        # Validate index
-        if 0 <= index_to_remove < len(stored_files):
-            filename_to_remove = stored_files[index_to_remove]['filename']
-            # Remove the file at the specified index
-            updated_files = [f for i, f in enumerate(stored_files) if i != index_to_remove]
+        if file_to_remove:
+            filename_to_remove = file_to_remove['filename']
+            
+            # Delete the temp file from server
+            temp_file_id = file_to_remove.get('temp_file_id')
+            file_session_id = file_to_remove.get('session_id', session_id)
+            if temp_file_id and file_session_id:
+                delete_temp_file(temp_file_id, file_session_id)
+            
+            # Remove the file from the list by comparing temp_file_id
+            updated_files = [f for f in stored_files if f.get('temp_file_id') != file_key_to_remove]
             logger.info(f"Removed file: {filename_to_remove}, Remaining files: {len(updated_files)}")
             return updated_files
         else:
-            logger.warning(f"Invalid index to remove: {index_to_remove}, file list length: {len(stored_files)}")
-            return stored_files
+            logger.warning(f"File not found for key: {file_key_to_remove}")
+            # Log all temp_file_ids for debugging
+            for idx, f in enumerate(stored_files):
+                logger.info(f"  File {idx}: filename={f.get('filename')}, temp_file_id={f.get('temp_file_id')}")
+            return no_update
             
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
-        logger.error(f"Error parsing button ID: {triggered_id}, Error: {e}")
-        return stored_files
+    except Exception as e:
+        logger.error(f"Error removing file: {e}")
+        return no_update
 
 # Note: Job submission now uses local storage via backend API
 
@@ -1660,12 +2389,13 @@ def remove_file(n_clicks, stored_files):
      State('privacy-setting', 'value'),
      State('input-mode-selector', 'value'),
      State('force-field-selector', 'value'),
-     State('uploaded-files-store', 'data')],
+     State('uploaded-files-store', 'data'),
+     State('session-id-store', 'data')],
     prevent_initial_call=True
 )
 def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff, 
                          source_sel, target_sel, privacy_setting, input_mode, 
-                         force_field, uploaded_files):
+                         force_field, uploaded_files, session_id):
     """Handle job submission with local file upload to backend."""
     logger.info(f"Job submission callback triggered: submit_clicks={submit_clicks}, files={len(uploaded_files) if uploaded_files else 0}")
     
@@ -1729,11 +2459,31 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         
         # Step 2: Upload files to backend local storage
         for file_data in uploaded_files:
-            # Decode base64 content
-            try:
-                content = base64.b64decode(file_data['content'])
-            except Exception as e:
-                logger.error(f"Failed to decode file {file_data['filename']}: {e}")
+            # Get file content from temp storage (not from base64 in store)
+            temp_file_id = file_data.get('temp_file_id')
+            file_session_id = file_data.get('session_id', session_id)
+            
+            if temp_file_id and file_session_id:
+                # Read from temp file
+                temp_file_path = get_temp_file_path(temp_file_id, file_session_id)
+                if temp_file_path and os.path.exists(temp_file_path):
+                    with open(temp_file_path, 'rb') as f:
+                        content = f.read()
+                else:
+                    logger.error(f"Temp file not found: {temp_file_path}")
+                    return html.Div([
+                        html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                        f"File expired or not found: {file_data['filename']}. Please re-upload."
+                    ], className="alert alert-danger"), no_update
+            elif 'content' in file_data:
+                # Fallback: decode from base64 content (legacy support)
+                try:
+                    content = base64.b64decode(file_data['content'])
+                except Exception as e:
+                    logger.error(f"Failed to decode file {file_data['filename']}: {e}")
+                    continue
+            else:
+                logger.error(f"No content available for file {file_data['filename']}")
                 continue
             
             upload_url = f"{config.backend_url}/api/jobs/{job_id}/upload"
@@ -1750,6 +2500,9 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 
                 if upload_response.status_code == 200:
                     logger.info(f"Successfully uploaded {file_data['filename']}")
+                    # Delete temp file after successful upload
+                    if temp_file_id and file_session_id:
+                        delete_temp_file(temp_file_id, file_session_id)
                 else:
                     error_msg = f"Upload failed for {file_data['filename']}: {upload_response.status_code}"
                     logger.error(error_msg)
@@ -1903,8 +2656,28 @@ def update_monitor_page(n_intervals, manual_refresh, job_id):
                                     }
                                 ) if (isinstance(job.status, JobStatus) and job.status == JobStatus.COMPLETED) or (isinstance(job.status, str) and job.status.lower() == 'completed') else html.Span()
                             ], style={'display': 'flex', 'alignItems': 'center'}),
-                            html.P(job.current_step or "No current step", 
-                                  style={'margin': '10px 0 0 0', 'color': '#5A7A60', 'fontSize': '0.9rem'})
+                            (
+                                None
+                                if (
+                                    (
+                                        (isinstance(job.status, JobStatus) and job.status == JobStatus.FAILED)
+                                        or (isinstance(job.status, str) and job.status.lower() == 'failed')
+                                    )
+                                    and (job.current_step or '').strip().lower() in {'job failed', 'failed'}
+                                )
+                                else html.P(
+                                    job.current_step or "No current step",
+                                    style={'margin': '10px 0 0 0', 'color': '#5A7A60', 'fontSize': '0.9rem'}
+                                )
+                            ),
+                            html.Div([
+                                html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                                html.Span("Job failed. Please check the Logs below for details.")
+                            ], className="alert alert-danger", style={'marginTop': '12px', 'padding': '10px 12px', 'fontSize': '0.9rem'})
+                            if (
+                                (isinstance(job.status, JobStatus) and job.status == JobStatus.FAILED) or
+                                (isinstance(job.status, str) and job.status.lower() == 'failed')
+                            ) else None
                         ])
                     ], className="panel", style={'flex': '1', 'marginLeft': '10px'})
                 ], style={'display': 'flex', 'marginBottom': '20px'}),
@@ -2255,10 +3028,10 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
         data = response.json()
         jobs = data.get('jobs', [])
         
-        # Apply client-side search filter
+        # Apply client-side search filter (private jobs have no job_id)
         if search_text and search_text.strip():
             search_text = search_text.strip().lower()
-            jobs = [job for job in jobs if search_text in job.get('job_id', '').lower()]
+            jobs = [job for job in jobs if search_text in str(job.get('job_id', '')).lower()]
         
         if not jobs:
             message = f"No jobs found matching '{search_text}'." if search_text else "No jobs found in the queue."
@@ -2279,9 +3052,9 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
         ])
         
         table_rows = []
-        for job_data in jobs:
-            job_id = job_data['job_id']
-            job_name = job_data.get('job_name', f"Job {job_id[:8]}")
+        for idx, job_data in enumerate(jobs):
+            job_id = job_data.get('job_id')
+            job_name = job_data.get('job_name') or (f"Job {str(job_id)[:8]}" if job_id else "Private job")
             status = job_data['status']
             created_at = job_data.get('created_at', '')
             progress = job_data.get('progress_percentage', 0)
@@ -2329,71 +3102,124 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text):
                 'width': '100%'
             })
             
-            # Actions
-            actions = html.Div([
-                html.A(
-                    html.I(className="fas fa-eye", title="Monitor"),
-                    href=f"/monitor/{job_id}",
-                    target="_blank",
-                    style={
-                        'display': 'inline-block',
-                        'padding': '6px 12px',
-                        'marginRight': '5px',
-                        'backgroundColor': 'rgba(0, 123, 255, 0.1)',
-                        'color': '#007bff',
-                        'textDecoration': 'none',
-                        'border': '1px solid rgba(0, 123, 255, 0.3)',
-                        'borderRadius': '5px',
-                        'fontSize': '0.9rem',
-                        'fontWeight': '500'
-                    }
-                ),
-                html.A(
-                    html.I(className="fas fa-download", title="Save Results"),
-                    href=f"{config.backend_url}/api/jobs/{job_id}/download" if status == 'completed' else "#",
-                    download=f"grinn-results-{job_id}.tar.gz" if status == 'completed' else None,
-                    style={
-                        'display': 'inline-block',
-                        'padding': '6px 12px',
-                        'marginRight': '5px',
-                        'backgroundColor': 'rgba(0, 123, 255, 0.1)' if status == 'completed' else 'rgba(0, 123, 255, 0.05)',
-                        'color': '#007bff' if status == 'completed' else 'rgba(0, 123, 255, 0.5)',
-                        'textDecoration': 'none',
-                        'border': '1px solid rgba(0, 123, 255, 0.3)' if status == 'completed' else '1px solid rgba(0, 123, 255, 0.2)',
-                        'borderRadius': '5px',
-                        'fontSize': '0.9rem',
-                        'fontWeight': '500',
-                        'cursor': 'pointer' if status == 'completed' else 'not-allowed',
-                        'opacity': '1' if status == 'completed' else '0.5',
-                        'pointerEvents': 'auto' if status == 'completed' else 'none'
-                    }
-                ),
-                html.Button(
-                    html.I(className="fas fa-chart-line", title="Launch Dashboard"),
-                    id={'type': 'launch-dashboard-btn', 'job_id': job_id},
-                    disabled=(status not in ['completed']),
-                    style={
-                        'padding': '6px 12px',
-                        'marginRight': '5px',
-                        'backgroundColor': 'rgba(40, 167, 69, 0.1)' if status == 'completed' else 'rgba(40, 167, 69, 0.05)',
-                        'color': '#28a745' if status == 'completed' else 'rgba(40, 167, 69, 0.5)',
-                        'border': '1px solid rgba(40, 167, 69, 0.3)' if status == 'completed' else '1px solid rgba(40, 167, 69, 0.2)',
-                        'borderRadius': '5px',
-                        'fontSize': '0.9rem',
-                        'fontWeight': '500',
-                        'cursor': 'pointer' if status == 'completed' else 'not-allowed',
-                        'opacity': '1' if status == 'completed' else '0.5'
-                    }
-                )
-            ], style={'display': 'flex', 'gap': '5px'})
+            # Actions (private jobs are visible for queue health but not linkable)
+            if is_private or not job_id:
+                actions = html.Div([
+                    html.Span(
+                        html.I(className="fas fa-eye", title="Private job"),
+                        style={
+                            'display': 'inline-block',
+                            'padding': '6px 12px',
+                            'marginRight': '5px',
+                            'backgroundColor': 'rgba(0, 0, 0, 0.03)',
+                            'color': 'rgba(0, 0, 0, 0.35)',
+                            'textDecoration': 'none',
+                            'border': '1px solid rgba(0, 0, 0, 0.1)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'cursor': 'not-allowed'
+                        }
+                    ),
+                    html.Span(
+                        html.I(className="fas fa-download", title="Private job"),
+                        style={
+                            'display': 'inline-block',
+                            'padding': '6px 12px',
+                            'marginRight': '5px',
+                            'backgroundColor': 'rgba(0, 0, 0, 0.03)',
+                            'color': 'rgba(0, 0, 0, 0.35)',
+                            'textDecoration': 'none',
+                            'border': '1px solid rgba(0, 0, 0, 0.1)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'cursor': 'not-allowed'
+                        }
+                    ),
+                    html.Span(
+                        html.I(className="fas fa-chart-line", title="Private job"),
+                        style={
+                            'display': 'inline-block',
+                            'padding': '6px 12px',
+                            'marginRight': '5px',
+                            'backgroundColor': 'rgba(0, 0, 0, 0.03)',
+                            'color': 'rgba(0, 0, 0, 0.35)',
+                            'textDecoration': 'none',
+                            'border': '1px solid rgba(0, 0, 0, 0.1)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'cursor': 'not-allowed'
+                        }
+                    )
+                ], style={'display': 'flex', 'gap': '5px'})
+            else:
+                actions = html.Div([
+                    html.A(
+                        html.I(className="fas fa-eye", title="Monitor"),
+                        href=f"/monitor/{job_id}",
+                        target="_blank",
+                        style={
+                            'display': 'inline-block',
+                            'padding': '6px 12px',
+                            'marginRight': '5px',
+                            'backgroundColor': 'rgba(0, 123, 255, 0.1)',
+                            'color': '#007bff',
+                            'textDecoration': 'none',
+                            'border': '1px solid rgba(0, 123, 255, 0.3)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500'
+                        }
+                    ),
+                    html.A(
+                        html.I(className="fas fa-download", title="Save Results"),
+                        href=f"{config.backend_url}/api/jobs/{job_id}/download" if status == 'completed' else "#",
+                        download=f"grinn-results-{job_id}.tar.gz" if status == 'completed' else None,
+                        style={
+                            'display': 'inline-block',
+                            'padding': '6px 12px',
+                            'marginRight': '5px',
+                            'backgroundColor': 'rgba(0, 123, 255, 0.1)' if status == 'completed' else 'rgba(0, 123, 255, 0.05)',
+                            'color': '#007bff' if status == 'completed' else 'rgba(0, 123, 255, 0.5)',
+                            'textDecoration': 'none',
+                            'border': '1px solid rgba(0, 123, 255, 0.3)' if status == 'completed' else '1px solid rgba(0, 123, 255, 0.2)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'cursor': 'pointer' if status == 'completed' else 'not-allowed',
+                            'opacity': '1' if status == 'completed' else '0.5',
+                            'pointerEvents': 'auto' if status == 'completed' else 'none'
+                        }
+                    ),
+                    html.Button(
+                        html.I(className="fas fa-chart-line", title="Launch Dashboard"),
+                        id={'type': 'launch-dashboard-btn', 'job_id': job_id},
+                        disabled=(status not in ['completed']),
+                        style={
+                            'padding': '6px 12px',
+                            'marginRight': '5px',
+                            'backgroundColor': 'rgba(40, 167, 69, 0.1)' if status == 'completed' else 'rgba(40, 167, 69, 0.05)',
+                            'color': '#28a745' if status == 'completed' else 'rgba(40, 167, 69, 0.5)',
+                            'border': '1px solid rgba(40, 167, 69, 0.3)' if status == 'completed' else '1px solid rgba(40, 167, 69, 0.2)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'cursor': 'pointer' if status == 'completed' else 'not-allowed',
+                            'opacity': '1' if status == 'completed' else '0.5'
+                        }
+                    )
+                ], style={'display': 'flex', 'gap': '5px'})
             
-            # Privacy indicator for job ID display
-            job_id_display = job_id
-            if is_private:
+            # Privacy indicator for job ID display (do not expose private IDs)
+            if is_private or not job_id:
                 job_id_display = html.Span([
                     html.I(className="fas fa-lock", style={'marginRight': '5px', 'color': '#6c757d'}),
-                    job_id
+                    "Private job"
                 ])
+            else:
+                job_id_display = job_id
             
             table_rows.append(html.Tr([
                 html.Td(job_id_display, style={'font-family': 'monospace', 'fontSize': '0.9rem'}),

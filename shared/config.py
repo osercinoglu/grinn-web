@@ -8,10 +8,21 @@ from dataclasses import dataclass
 from typing import Optional
 import logging
 
-# Load environment variables from .env file
+# Load environment variables from a deterministic .env location.
+# Rationale: Celery/other processes may be started with an arbitrary CWD, so
+# relying on python-dotenv's default search can miss grinn-web/.env.
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _default_dotenv = os.path.normpath(os.path.join(_here, '..', '.env'))
+    _dotenv_path = os.getenv('GRINN_WEB_DOTENV_PATH', _default_dotenv)
+
+    if os.path.exists(_dotenv_path):
+        load_dotenv(dotenv_path=_dotenv_path, override=False)
+    else:
+        # Fall back to default behavior (CWD-based) if file isn't present.
+        load_dotenv(override=False)
 except ImportError:
     # dotenv not available, use environment variables as-is
     pass
@@ -46,7 +57,7 @@ class Config:
     job_file_retention_hours: int = 72  # 3 days default
     
     # gRINN Docker settings
-    grinn_docker_image: str = "grinn:latest"
+    grinn_docker_image: str = "grinn:gromacs-2024.1"
     docker_timeout: int = 3600  # 1 hour default timeout
     
     # Dashboard settings
@@ -55,6 +66,7 @@ class Config:
     # Job settings
     max_trajectory_file_size_mb: int = 100
     max_other_file_size_mb: int = 10
+    max_frames: Optional[int] = None  # Optional global cap for trajectory frames / ensemble models
     job_retention_days: int = 3  # Results kept for 3 days only
     max_concurrent_jobs: int = 10
     
@@ -138,6 +150,19 @@ class Config:
         # Job settings
         self.max_trajectory_file_size_mb = int(os.getenv("MAX_TRAJECTORY_FILE_SIZE_MB", self.max_trajectory_file_size_mb))
         self.max_other_file_size_mb = int(os.getenv("MAX_OTHER_FILE_SIZE_MB", self.max_other_file_size_mb))
+
+        # Global max frames limit (optional)
+        max_frames_raw = os.getenv("MAX_FRAMES")
+        if max_frames_raw is None or max_frames_raw == "":
+            self.max_frames = None
+        else:
+            try:
+                parsed = int(max_frames_raw)
+                self.max_frames = parsed if parsed > 0 else None
+            except ValueError:
+                logging.warning(f"Invalid MAX_FRAMES value: {max_frames_raw}. Disabling max frames limit.")
+                self.max_frames = None
+
         self.job_retention_days = int(os.getenv("JOB_RETENTION_DAYS", self.job_retention_days))
         self.max_concurrent_jobs = int(os.getenv("MAX_CONCURRENT_JOBS", self.max_concurrent_jobs))
         

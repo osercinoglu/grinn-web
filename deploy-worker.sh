@@ -97,7 +97,7 @@ docker-compose -f docker-compose.worker.yml ps
 
 # Test job processing capability
 echo "🧪 Testing worker capabilities..."
-if docker run --rm ${GRINN_DOCKER_IMAGE:-grinn:latest} --help > /dev/null 2>&1; then
+if docker run --rm ${GRINN_DOCKER_IMAGE:-grinn:gromacs-2024.1} --help > /dev/null 2>&1; then
     echo "✅ gRINN executable: Ready"
 else
     echo "❌ gRINN executable: Not accessible"

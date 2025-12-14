@@ -292,7 +292,7 @@ def main():
                        help='Redis password (or set REDIS_PASSWORD env var)')
     parser.add_argument('--backend-port', type=int, default=8050,
                        help='Backend API port (default: 8050)')
-    parser.add_argument('--grinn-image', default='grinn:latest',
+    parser.add_argument('--grinn-image', default='grinn:gromacs-2024.1',
                        help='gRINN Docker image name')
     parser.add_argument('--timeout', type=int, default=7200,
                        help='Job timeout in seconds (default: 2 hours)')

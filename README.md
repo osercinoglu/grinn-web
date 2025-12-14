@@ -238,7 +238,7 @@ python standalone-worker.py \
 - `--registration-token`: Token for worker authentication
 - `--storage-path`: Path to shared storage/NFS mount (default: /data/grinn-jobs)
 - `--concurrency`: Number of concurrent jobs (default: 2)
-- `--grinn-image`: gRINN Docker image name (default: grinn:latest)
+- `--grinn-image`: gRINN Docker image name (default: grinn:gromacs-2024.1)
 - `--timeout`: Job timeout in seconds (default: 7200)
 
 ---
@@ -758,7 +758,7 @@ Analyze molecular dynamics trajectory files with pre-computed topology.
 
 **Required Files:**
 - Structure file (PDB or GRO format)
-- Trajectory file (XTC or TRR format, max 100MB)
+- Trajectory file (XTC or TRR format; limit set by `MAX_TRAJECTORY_FILE_SIZE_MB`)
 - Topology file (TPR or TOP format)
 
 **Optional Files:**

@@ -39,3 +39,7 @@ pytest==8.3.4
 pytest-cov==6.0.0
 black==24.10.0
 flake8==7.1.1
+
+# Chat interface (pandasai)
+pandasai==3.0.0
+pandasai-litellm==0.0.1

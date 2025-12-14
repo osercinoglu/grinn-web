@@ -27,7 +27,7 @@ services:
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
       
       # gRINN Docker image for computational jobs
-      - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:latest}
+      - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:gromacs-2024.1}
       - DOCKER_TIMEOUT=7200  # 2 hours for long computations
       
     volumes:

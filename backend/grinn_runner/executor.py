@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class GrinnExecutor:
     """Executes gRINN analysis with proper Docker isolation and monitoring."""
     
-    def __init__(self, docker_image: str = "grinn:latest", 
+    def __init__(self, docker_image: str = "grinn:gromacs-2024.1", 
                  timeout: int = 3600, memory_limit: str = "8g", 
                  cpu_limit: str = "4"):
         self.docker_image = docker_image

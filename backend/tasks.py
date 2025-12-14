@@ -10,7 +10,7 @@ import tempfile
 import shutil
 import zipfile
 from celery import Celery
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import logging
 
 # Add parent directory to path for Celery workers to find shared modules
@@ -66,28 +66,92 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
     local_db_manager = DatabaseManager()
     local_config = get_config()
     local_storage_manager = get_storage_manager(local_config.storage_path)
-    
+
+    def _truncate_for_db(text: str, max_chars: int = 20000) -> str:
+        if not text:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return "[...truncated...]\n" + text[-max_chars:]
+
+    def _extract_preflight_summary(preflight_logs: str) -> str:
+        """Extract the actionable validation failure from verbose preflight logs."""
+        if not preflight_logs:
+            return ""
+
+        lines = preflight_logs.splitlines()
+
+        # Prefer the dedicated validation report block emitted by grinn_workflow.py
+        report_idx = None
+        for i, line in enumerate(lines):
+            if "gRINN Input Validation Report" in line:
+                report_idx = i
+                break
+
+        if report_idx is not None:
+            start = report_idx
+            # Include the separator line above the title if present
+            while start > 0 and lines[start - 1].strip() and set(lines[start - 1].strip()) == {'='}:
+                start -= 1
+
+            end = report_idx
+            stop_markers = (
+                "Workflow cannot proceed",
+                "conda.cli.main_run",
+                "conda run",
+            )
+            while end < len(lines) and not any(m in lines[end] for m in stop_markers):
+                end += 1
+            if end < len(lines) and "Workflow cannot proceed" in lines[end]:
+                end += 1
+
+            block = "\n".join(lines[start:end]).strip()
+            if block:
+                return block
+
+        # Fallback: show the last few ERROR/FAIL lines if the report isn't present
+        interesting = []
+        for line in lines:
+            if line.startswith("ERROR:") or line.startswith("❌") or "Preflight" in line:
+                interesting.append(line)
+        tail = "\n".join(interesting[-20:]).strip()
+        if tail:
+            return tail
+        return "\n".join(lines[-40:]).strip()
+
+    def _get_existing_error_message() -> Optional[str]:
+        try:
+            existing_job = local_db_manager.get_job(job_id)
+            return existing_job.error_message if existing_job else None
+        except Exception:
+            return None
+
+    def _update_failed_preserving_error(current_step: str, error_message: Optional[str]):
+        existing_error = _get_existing_error_message()
+        local_db_manager.update_job_status(
+            job_id,
+            JobStatus.FAILED,
+            current_step=current_step,
+            error_message=existing_error or error_message
+        )
+
     try:
         logger.info(f"Starting job {job_id}")
-        
+
         # Update job status to running
         job = local_db_manager.get_job(job_id)
         if not job:
             raise ValueError(f"Job {job_id} not found")
-        
-        # Update job status using the database manager method
-        local_db_manager.update_job_status(job_id, JobStatus.RUNNING, "Processing gRINN analysis", 25)
-        
+
+        local_db_manager.update_job_status(job_id, JobStatus.RUNNING, "Preparing job", 10)
+
         # Use local storage directories directly (accessible via NFS for multi-worker setups)
         input_dir = local_storage_manager.get_input_directory(job_id)
         output_dir = local_storage_manager.get_output_directory(job_id)
-        
+
         try:
             # Verify input files exist
             logger.info(f"Verifying input files for job {job_id}")
-            
-            # Get job details to determine input mode and files
-            job = local_db_manager.get_job(job_id)
             input_mode = job_params.get('input_mode', 'trajectory')
             
             # Files are already in place in local storage (accessible via NFS)
@@ -148,7 +212,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             logger.info(f"Running gRINN analysis for job {job_id} in {input_mode} mode")
             docker_client = docker.from_env()
             
-            grinn_image = os.getenv('GRINN_DOCKER_IMAGE', 'grinn:latest')
+            grinn_image = os.getenv('GRINN_DOCKER_IMAGE', 'grinn:gromacs-2024.1')
             
             # Build Docker command following grinn_workflow.py argument structure
             # The Docker entrypoint expects 'workflow' as the first argument,
@@ -192,6 +256,24 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             # Skip frames in trajectory (default: 1 = no skipping)
             if job_params.get('skip_frames') and job_params['skip_frames'] > 1:
                 docker_command.extend(['--skip', str(job_params['skip_frames'])])
+
+            # Maximum frames to process (optional)
+            effective_max_frames = job_params.get('max_frames', None)
+            if effective_max_frames is None:
+                effective_max_frames = getattr(local_config, 'max_frames', None)
+
+            logger.info(
+                f"Max frames selection for job {job_id}: job_params.max_frames={job_params.get('max_frames', None)!r}, "
+                f"config.MAX_FRAMES={getattr(local_config, 'max_frames', None)!r}"
+            )
+
+            if effective_max_frames is not None:
+                try:
+                    max_frames = int(effective_max_frames)
+                    if max_frames > 0:
+                        docker_command.extend(['--max_frames', str(max_frames)])
+                except (TypeError, ValueError):
+                    logger.warning(f"Ignoring invalid max_frames value: {effective_max_frames}")
             
             # Source and target selection for residue filtering
             if job_params.get('source_sel'):
@@ -220,21 +302,23 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             if job_params.get('skip_pdb_fix'):
                 docker_command.append('--nofixpdb')
             
-            # PEN (Protein Energy Network) creation
-            if job_params.get('create_pen'):
-                docker_command.append('--create_pen')
-                
-                # PEN cutoffs (list of energy cutoff values)
-                if job_params.get('pen_cutoffs'):
-                    cutoffs = job_params['pen_cutoffs']
-                    if isinstance(cutoffs, (list, tuple)):
-                        docker_command.extend(['--pen_cutoffs'] + [str(c) for c in cutoffs])
-                
-                # Include covalent bonds in PEN
-                if job_params.get('pen_include_covalents') is not None:
-                    include_cov = job_params['pen_include_covalents']
-                    if isinstance(include_cov, (list, tuple)):
-                        docker_command.extend(['--pen_include_covalents'] + [str(ic).lower() for ic in include_cov])
+            # PEN (Protein Energy Network) precompute
+            # grinn_workflow.py attempts PEN precompute by default (when eligible).
+            # Respect the UI toggle by passing --no_pen when create_pen is explicitly False.
+            if job_params.get('create_pen') is False:
+                docker_command.append('--no_pen')
+
+            # PEN cutoffs (list of energy cutoff values)
+            if job_params.get('pen_cutoffs'):
+                cutoffs = job_params['pen_cutoffs']
+                if isinstance(cutoffs, (list, tuple)):
+                    docker_command.extend(['--pen_cutoffs'] + [str(c) for c in cutoffs])
+
+            # Include covalent bonds in PEN
+            if job_params.get('pen_include_covalents') is not None:
+                include_cov = job_params['pen_include_covalents']
+                if isinstance(include_cov, (list, tuple)):
+                    docker_command.extend(['--pen_include_covalents'] + [str(ic).lower() for ic in include_cov])
             
             logger.info(f"Docker command: {' '.join(docker_command)}")
             logger.info(f"Mounting host directory {input_dir} to container /input")
@@ -252,6 +336,77 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                 logger.info(f"Input directory structure:\n" + "\n".join(all_items))
             else:
                 logger.error(f"Input directory does not exist: {input_dir}")
+
+            # Preflight validation: run workflow in --test-only mode first and surface any errors to the user
+            local_db_manager.update_job_status(job_id, JobStatus.RUNNING, "Preflight: validating inputs", 15)
+
+            preflight_container_name = f"grinn-preflight-{job_id}"
+            preflight_container = None
+            try:
+                # Remove any stale container with the same name
+                try:
+                    stale = docker_client.containers.get(preflight_container_name)
+                    stale.remove(force=True)
+                except docker.errors.NotFound:
+                    pass
+                except Exception as cleanup_error:
+                    logger.warning(f"Could not remove stale preflight container {preflight_container_name}: {cleanup_error}")
+
+                preflight_command = docker_command + ['--test-only']
+                logger.info(
+                    f"Starting preflight container {preflight_container_name} with command: {' '.join(preflight_command)}"
+                )
+
+                preflight_container = docker_client.containers.run(
+                    grinn_image,
+                    command=preflight_command,
+                    volumes={
+                        input_dir: {'bind': '/input', 'mode': 'ro'},
+                        output_dir: {'bind': '/output', 'mode': 'rw'}
+                    },
+                    name=preflight_container_name,
+                    remove=False,
+                    detach=True,
+                    stdout=True,
+                    stderr=True
+                )
+
+                preflight_result = preflight_container.wait()
+                preflight_exit_code = preflight_result.get('StatusCode', -1)
+                preflight_logs = preflight_container.logs(stdout=True, stderr=True).decode('utf-8', errors='replace')
+                logger.info(
+                    f"Preflight output for job {job_id} (exit code: {preflight_exit_code}):\n{preflight_logs}"
+                )
+
+                # Persist full preflight logs to output folder for later inspection/download.
+                try:
+                    os.makedirs(output_dir, exist_ok=True)
+                    preflight_log_path = os.path.join(output_dir, 'preflight.log')
+                    with open(preflight_log_path, 'w', encoding='utf-8', errors='replace') as f:
+                        f.write(preflight_logs)
+                except Exception as e:
+                    logger.warning(f"Could not write preflight.log for job {job_id}: {e}")
+
+                if preflight_exit_code != 0:
+                    summary = _extract_preflight_summary(preflight_logs)
+                    error_message = _truncate_for_db(
+                        "Preflight validation failed. Please fix the input files/parameters and resubmit.\n\n"
+                        + (summary or "(No additional details available.)")
+                    )
+                    _update_failed_preserving_error("Preflight failed", error_message)
+                    raise RuntimeError("Preflight failed")
+
+            finally:
+                if preflight_container is not None:
+                    try:
+                        preflight_container.remove(force=True)
+                    except Exception as remove_error:
+                        logger.warning(
+                            f"Could not remove preflight container {preflight_container_name}: {remove_error}"
+                        )
+
+            # Preflight passed; continue with full processing
+            local_db_manager.update_job_status(job_id, JobStatus.RUNNING, "Processing gRINN analysis", 25)
             
             # Run container in detached mode with a name for log streaming
             container_name = f"grinn-{job_id}"
@@ -320,13 +475,8 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
         except Exception as e:
             logger.error(f"Job {job_id} failed: {str(e)}")
             
-            # Update job status to failed
-            local_db_manager.update_job_status(
-                job_id,
-                JobStatus.FAILED,
-                current_step="Job failed",
-                error_message=str(e)
-            )
+            # Update job status to failed (preserve richer error messages if already set)
+            _update_failed_preserving_error("Job failed", str(e))
             
             raise
         
@@ -337,7 +487,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
         
         # Update job status to failed
         try:
-            local_db_manager.update_job_status(job_id, JobStatus.FAILED, "Job failed", error_message=str(e))
+            _update_failed_preserving_error("Job failed", str(e))
         except Exception as db_error:
             logger.error(f"Failed to update job status: {str(db_error)}")
         
