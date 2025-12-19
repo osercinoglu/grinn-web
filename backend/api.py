@@ -9,9 +9,10 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from celery.result import AsyncResult
+import requests as http_requests  # For proxying dashboard requests
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -86,10 +87,11 @@ def initialize_managers():
         # Initialize worker registry
         worker_registry = get_worker_registry(redis_client)
         
-        # Initialize dashboard manager with public host from config
+        # Initialize dashboard manager with public host from config and Redis for persistence
         dashboard_manager = DashboardManager(
             storage_manager,
-            public_host=config.dashboard_public_host
+            public_host=config.dashboard_public_host,
+            redis_client=redis_client
         )
         
         _managers_initialized = True
@@ -309,6 +311,17 @@ def create_job():
         ensure_managers_initialized()
         data = request.get_json()
         
+        # Check queue capacity before accepting new jobs
+        queued_count = database_manager.count_queued_jobs()
+        if queued_count >= config.max_queued_jobs:
+            logger.warning(f"Queue capacity reached: {queued_count}/{config.max_queued_jobs} jobs queued")
+            return jsonify({
+                'error': 'Queue capacity reached',
+                'message': f'The job queue is currently full ({queued_count} jobs queued). Please try again later.',
+                'queued_jobs': queued_count,
+                'max_queued_jobs': config.max_queued_jobs
+            }), 503
+        
         # Validate required fields
         if not data:
             return jsonify({'error': 'Request body is required'}), 400
@@ -344,7 +357,8 @@ def create_job():
                 input_files=[{
                     'filename': f['filename'],
                     'file_type': f.get('file_type', 'unknown'),
-                    'size_bytes': f.get('size', 0)
+                    'size_bytes': f.get('size', 0),
+                    'role': f.get('role', 'unknown')
                 } for f in files_info]
             )
             session.add(job_model)
@@ -397,6 +411,11 @@ def upload_job_file(job_id: str):
                 return jsonify({
                     'error': f'Job is in {job.status.value} state, cannot upload files'
                 }), 400
+            
+            # Get input mode from job parameters for size limit determination
+            job_input_mode = None
+            if job.parameters:
+                job_input_mode = job.parameters.get('input_mode', 'trajectory')
         
         # Update status to uploading
         database_manager.update_job_status(
@@ -417,12 +436,23 @@ def upload_job_file(job_id: str):
         filename = file.filename
         
         # Server-side file size validation (configurable per-file type)
+        # Ensemble PDB files are treated as trajectory-class (larger limit) since they contain trajectory data
         content_length = request.content_length
 
         lower_name = filename.lower()
         is_trajectory = lower_name.endswith('.xtc') or lower_name.endswith('.trr')
-        max_file_size_mb = config.max_trajectory_file_size_mb if is_trajectory else config.max_other_file_size_mb
+        is_ensemble_pdb = (job_input_mode == 'ensemble' and lower_name.endswith('.pdb'))
+        use_trajectory_limit = is_trajectory or is_ensemble_pdb
+        max_file_size_mb = config.max_trajectory_file_size_mb if use_trajectory_limit else config.max_other_file_size_mb
         max_file_size = max_file_size_mb * 1024 * 1024
+        
+        # Descriptive file type label for error messages
+        if is_ensemble_pdb:
+            file_type_label = 'ensemble PDB'
+        elif is_trajectory:
+            file_type_label = 'trajectory'
+        else:
+            file_type_label = 'structure PDB' if lower_name.endswith('.pdb') else 'structure/topology'
 
         if content_length and content_length > max_file_size:
             logger.warning(
@@ -430,7 +460,7 @@ def upload_job_file(job_id: str):
             )
             return jsonify({
                 'error': (
-                    f"File too large. Maximum allowed size for {'trajectory' if is_trajectory else 'other'} files is "
+                    f"File too large. Maximum allowed size for {file_type_label} files is "
                     f"{max_file_size_mb}MB. Your file: {content_length / 1024 / 1024:.1f}MB"
                 )
             }), 413
@@ -445,7 +475,7 @@ def upload_job_file(job_id: str):
             )
             return jsonify({
                 'error': (
-                    f"File too large. Maximum allowed size for {'trajectory' if is_trajectory else 'other'} files is "
+                    f"File too large. Maximum allowed size for {file_type_label} files is "
                     f"{max_file_size_mb}MB. Your file: {file_size / 1024 / 1024:.1f}MB"
                 )
             }), 413
@@ -527,13 +557,34 @@ def start_job_processing(job_id: str):
                 if job_model:
                     parameters = job_model.parameters or {}
             
-            # Submit task to Celery
-            task = process_grinn_job.delay(job_id, parameters)
+            # Determine queue based on GROMACS version (for trajectory mode)
+            # Only use version-specific queues when remote workers are registered
+            input_mode = parameters.get('input_mode', 'trajectory')
+            gromacs_version = parameters.get('gromacs_version')
+            
+            # Check if we have remote workers registered
+            active_workers = worker_registry.get_active_workers()
+            has_remote_workers = len(active_workers) > 0
+            
+            if has_remote_workers and input_mode == 'trajectory' and gromacs_version:
+                # Production mode: route to version-specific queue for remote workers
+                queue_name = f"grinn_jobs_{gromacs_version.replace('.', '_')}"
+                logger.info(f"Routing job {job_id} to version-specific queue: {queue_name}")
+            else:
+                # Local development mode or ensemble mode: use default queue
+                queue_name = 'grinn_jobs'
+                logger.info(f"Routing job {job_id} to default queue: {queue_name}")
+            
+            # Submit task to Celery with routing
+            task = process_grinn_job.apply_async(
+                args=[job_id, parameters],
+                queue=queue_name
+            )
             
             # Update job with Celery task ID
             database_manager.set_worker_info(job_id, task.id)
             
-            logger.info(f"Submitted job {job_id} with Celery task ID {task.id}")
+            logger.info(f"Submitted job {job_id} with Celery task ID {task.id} to queue {queue_name}")
             
             return jsonify({
                 'success': True,
@@ -566,6 +617,7 @@ def register_worker():
     """
     Register a new worker with the system.
     Requires valid registration token for authentication.
+    Now also stores worker in database for capacity tracking.
     """
     try:
         ensure_managers_initialized()
@@ -585,8 +637,12 @@ def register_worker():
         facility = data.get('facility', 'default')
         capabilities = data.get('capabilities', {})
         metadata = data.get('metadata', {})
+        hostname = data.get('hostname')
+        max_concurrent_jobs = data.get('max_concurrent_jobs', config.worker_max_concurrent_jobs)
+        available_gromacs_versions = data.get('available_gromacs_versions', [])
         
         try:
+            # Register with Redis-based worker registry
             result = worker_registry.register_worker(
                 token=token,
                 worker_id=worker_id,
@@ -595,7 +651,16 @@ def register_worker():
                 metadata=metadata
             )
             
-            logger.info(f"Worker registered: {worker_id} at {facility}")
+            # Also register in database for capacity tracking
+            database_manager.register_worker(
+                worker_id=worker_id,
+                facility_name=facility,
+                hostname=hostname,
+                max_concurrent_jobs=max_concurrent_jobs,
+                available_gromacs_versions=available_gromacs_versions
+            )
+            
+            logger.info(f"Worker registered: {worker_id} at {facility} (capacity: {max_concurrent_jobs})")
             return jsonify(result), 200
             
         except PermissionError as e:
@@ -613,6 +678,7 @@ def register_worker():
 def worker_heartbeat():
     """
     Update worker heartbeat to indicate it's still alive.
+    Also updates current job count for capacity tracking.
     """
     try:
         ensure_managers_initialized()
@@ -626,15 +692,23 @@ def worker_heartbeat():
             return jsonify({'error': 'worker_id is required'}), 400
         
         current_job = data.get('current_job')
+        current_job_count = data.get('current_job_count')
         status = data.get('status', 'active')
         
+        # Update Redis-based worker registry
         success = worker_registry.heartbeat(
             worker_id=worker_id,
             current_job=current_job,
             status=status
         )
         
-        if success:
+        # Update database heartbeat and job count
+        db_success = database_manager.update_worker_heartbeat(
+            worker_id=worker_id,
+            current_job_count=current_job_count
+        )
+        
+        if success or db_success:
             return jsonify({'success': True}), 200
         else:
             return jsonify({'error': 'Worker not found'}), 404
@@ -760,6 +834,163 @@ def get_storage_stats():
         return jsonify({'error': f'Failed to get storage stats: {str(e)}'}), 500
 
 
+# ============================================================================
+# GROMACS Version Discovery Endpoint
+# ============================================================================
+
+# Cache key and TTL for GROMACS versions
+GROMACS_VERSIONS_CACHE_KEY = 'grinn:cache:gromacs_versions'
+GROMACS_VERSIONS_CACHE_TTL = 60  # 60 seconds
+
+
+def parse_gromacs_version(version_str: str):
+    """
+    Parse GROMACS version string for proper numerical sorting.
+    Returns tuple for comparison, e.g., '2024.1' -> (2024, 1)
+    """
+    try:
+        parts = version_str.split('.')
+        return tuple(int(p) for p in parts)
+    except (ValueError, AttributeError):
+        # Fallback for malformed versions - sort at end
+        return (0, 0)
+
+
+def discover_local_grinn_images():
+    """
+    Discover all available grinn:gromacs-* Docker images on the local system.
+    Used as fallback when no remote workers are registered (local development mode).
+    Returns list of dicts with 'tag' and 'version' keys.
+    """
+    try:
+        import docker
+        client = docker.from_env()
+        images = client.images.list()
+        grinn_images = []
+        
+        for img in images:
+            for tag in (img.tags or []):
+                if tag.startswith('grinn:gromacs-'):
+                    version = tag.replace('grinn:gromacs-', '')
+                    grinn_images.append({
+                        'tag': tag,
+                        'version': version
+                    })
+        
+        return grinn_images
+    except Exception as e:
+        logger.warning(f"Could not discover local GROMACS images: {e}")
+        return []
+
+
+@app.route('/api/gromacs-versions', methods=['GET'])
+def get_gromacs_versions():
+    """
+    Get all GROMACS versions available across active workers.
+    Falls back to local Docker image discovery if no workers are registered.
+    Returns union of versions with worker counts, sorted descending (newest first).
+    Results are cached for 60 seconds to reduce Redis queries.
+    """
+    try:
+        ensure_managers_initialized()
+        
+        # Try to get from cache first
+        redis_client = worker_registry.redis
+        cached = redis_client.get(GROMACS_VERSIONS_CACHE_KEY)
+        
+        if cached:
+            import json
+            return jsonify(json.loads(cached)), 200
+        
+        # Get active workers and aggregate versions
+        active_workers = worker_registry.get_active_workers()
+        
+        version_workers = {}  # version -> list of worker_ids
+        is_local_mode = False  # Track if using local discovery
+        
+        if active_workers:
+            # Remote workers mode: aggregate versions from registered workers
+            for worker in active_workers:
+                worker_id = worker.get('worker_id', 'unknown')
+                capabilities = worker.get('capabilities', {})
+                available_images = capabilities.get('available_grinn_images', [])
+                
+                for img in available_images:
+                    version = img.get('version')
+                    if version:
+                        if version not in version_workers:
+                            version_workers[version] = []
+                        version_workers[version].append(worker_id)
+        else:
+            # Local development mode: discover images on this machine
+            logger.info("No remote workers registered, using local Docker image discovery")
+            is_local_mode = True
+            local_images = discover_local_grinn_images()
+            
+            for img in local_images:
+                version = img.get('version')
+                if version:
+                    if version not in version_workers:
+                        version_workers[version] = []
+                    version_workers[version].append('local')
+        
+        # Sort versions in descending order (newest first) using numerical comparison
+        sorted_versions = sorted(
+            version_workers.keys(),
+            key=parse_gromacs_version,
+            reverse=True
+        )
+        
+        # Build response with worker counts and proper grammar
+        versions_list = []
+        for version in sorted_versions:
+            if is_local_mode:
+                # Local mode: don't show worker count in label
+                versions_list.append({
+                    'version': version,
+                    'worker_count': 1,
+                    'label': version
+                })
+            else:
+                # Remote workers mode: show worker count
+                worker_count = len(version_workers[version])
+                versions_list.append({
+                    'version': version,
+                    'worker_count': worker_count,
+                    'label': f"{version} ({worker_count} {'worker' if worker_count == 1 else 'workers'})"
+                })
+        
+        # Determine default version (prefer config, otherwise newest available)
+        default_version = getattr(config, 'default_gromacs_version', None)
+        if default_version and default_version not in version_workers:
+            # Configured default not available, use newest
+            default_version = sorted_versions[0] if sorted_versions else None
+        elif not default_version and sorted_versions:
+            default_version = sorted_versions[0]
+        
+        result = {
+            'success': True,
+            'versions': versions_list,
+            'default': default_version,
+            'worker_count': len(active_workers) if not is_local_mode else 1,
+            'is_local_mode': is_local_mode
+        }
+        
+        # Cache the result
+        import json
+        redis_client.setex(
+            GROMACS_VERSIONS_CACHE_KEY,
+            GROMACS_VERSIONS_CACHE_TTL,
+            json.dumps(result)
+        )
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting GROMACS versions: {e}")
+        return jsonify({'error': f'Failed to get GROMACS versions: {str(e)}'}), 500
+
+
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get system statistics."""
@@ -819,6 +1050,13 @@ def start_dashboard(job_id):
         job = database_manager.get_job(job_id)
         if not job:
             return jsonify({'error': 'Job not found'}), 404
+        
+        # Check if job is expired
+        if job.status == JobStatus.EXPIRED.value:
+            return jsonify({
+                'error': 'Job has expired. Dashboard is no longer available.',
+                'expired': True
+            }), 410  # 410 Gone
         
         # Start dashboard
         result = dashboard_manager.start_dashboard(job_id)
@@ -914,6 +1152,264 @@ def list_dashboards():
         
     except Exception as e:
         logger.error(f"Error listing dashboards: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dashboard/availability', methods=['GET'])
+def get_dashboard_availability():
+    """
+    Get dashboard availability status.
+    Used by frontend to disable launch buttons when capacity is reached.
+    
+    Returns:
+        JSON with availability info: {available: bool, active: int, max: int}
+    """
+    ensure_managers_initialized()
+    
+    try:
+        availability = dashboard_manager.get_dashboard_availability()
+        return jsonify(availability), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting dashboard availability: {e}")
+        return jsonify({'error': str(e), 'available': True, 'active': 0, 'max': 10}), 500
+
+@app.route('/api/dashboard/<job_id>/heartbeat', methods=['POST'])
+def dashboard_heartbeat(job_id):
+    """
+    Dashboard heartbeat endpoint to track active dashboards.
+    Frontend sends periodic heartbeats to keep dashboard alive.
+    """
+    ensure_managers_initialized()
+    
+    try:
+        data = request.get_json() or {}
+        closing = data.get('closing', False)
+        
+        # If closing flag is set, stop the dashboard immediately
+        if closing:
+            result = dashboard_manager.stop_dashboard(job_id)
+            return jsonify({'success': True, 'message': 'Dashboard stopped'}), 200
+        
+        # Update dashboard heartbeat timestamp
+        if job_id in dashboard_manager.active_dashboards:
+            info = dashboard_manager.active_dashboards[job_id]
+            info['last_heartbeat'] = datetime.utcnow()
+            # Persist heartbeat to Redis
+            dashboard_manager._save_dashboard_to_redis(job_id, info)
+            
+            return jsonify({'success': True}), 200
+        else:
+            return jsonify({'error': 'Dashboard not found'}), 404
+            
+    except Exception as e:
+        logger.error(f"Error processing dashboard heartbeat for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/dashboard/<job_id>/close', methods=['POST'])
+def close_dashboard(job_id):
+    """
+    Close/stop a dashboard container.
+    Called by frontend when user closes the dashboard window.
+    More reliable than heartbeat with closing flag since it's a dedicated endpoint.
+    """
+    ensure_managers_initialized()
+    
+    try:
+        result = dashboard_manager.stop_dashboard(job_id)
+        if result.get('success'):
+            logger.info(f"Dashboard closed for job {job_id} via close endpoint")
+            return jsonify({'success': True, 'message': 'Dashboard stopped'}), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"Error closing dashboard for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Dashboard Proxy Endpoint
+# ============================================================================
+# This endpoint proxies requests to the dashboard container for a job.
+# It looks up the port for the job_id and forwards requests to localhost:{port}
+# This allows dashboard access through nginx without exposing individual ports.
+
+@app.route('/api/dashboard/<job_id>/', defaults={'subpath': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+@app.route('/api/dashboard/<job_id>/<path:subpath>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+def proxy_dashboard(job_id, subpath):
+    """
+    Proxy requests to the dashboard container for a job.
+    
+    This endpoint looks up the dashboard port for the given job_id and proxies
+    the request to the dashboard container running on that port.
+    
+    Args:
+        job_id: The job ID to proxy to
+        subpath: The path within the dashboard app
+    
+    Returns:
+        Proxied response from the dashboard container
+    """
+    ensure_managers_initialized()
+    
+    try:
+        # Look up the dashboard info for this job
+        if job_id not in dashboard_manager.active_dashboards:
+            return jsonify({'error': f'Dashboard not running for job {job_id}'}), 404
+        
+        info = dashboard_manager.active_dashboards[job_id]
+        port = info['port']
+        
+        # Verify container is actually running
+        if not dashboard_manager._is_container_running(info['container_id']):
+            # Clean up stale entry
+            del dashboard_manager._active_dashboards_cache[job_id]
+            dashboard_manager._remove_dashboard_from_redis(job_id)
+            return jsonify({'error': 'Dashboard container is not running'}), 503
+        
+        # Build the target URL
+        # The dashboard container is configured with DASH_URL_BASE_PATHNAME=/api/dashboard/{job_id}/
+        # So we must forward the full path including the prefix
+        target_url = f"http://127.0.0.1:{port}/api/dashboard/{job_id}/{subpath}"
+        if request.query_string:
+            target_url += f"?{request.query_string.decode('utf-8')}"
+        
+        # Prepare headers (filter out hop-by-hop headers)
+        headers = {key: value for key, value in request.headers if key.lower() not in 
+                   ['host', 'connection', 'keep-alive', 'proxy-authenticate', 
+                    'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade']}
+        
+        # Make the proxied request
+        try:
+            resp = http_requests.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                data=request.get_data(),
+                cookies=request.cookies,
+                allow_redirects=False,
+                stream=True,
+                timeout=30
+            )
+        except http_requests.exceptions.ConnectionError:
+            return jsonify({'error': 'Dashboard container not responding'}), 503
+        except http_requests.exceptions.Timeout:
+            return jsonify({'error': 'Dashboard request timed out'}), 504
+        
+        # Build response headers (filter out hop-by-hop headers)
+        # Keep content-encoding so browser can decompress gzip responses
+        excluded_headers = ['content-length', 'transfer-encoding', 'connection']
+        response_headers = [(name, value) for name, value in resp.raw.headers.items()
+                           if name.lower() not in excluded_headers]
+        
+        # Stream the response back
+        def generate():
+            for chunk in resp.iter_content(chunk_size=8192):
+                yield chunk
+        
+        return Response(
+            stream_with_context(generate()),
+            status=resp.status_code,
+            headers=response_headers,
+            content_type=resp.headers.get('content-type')
+        )
+        
+    except Exception as e:
+        logger.error(f"Error proxying dashboard request for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Token Usage API Endpoints
+# ============================================================================
+
+@app.route('/api/jobs/<job_id>/token-usage', methods=['GET'])
+def get_token_usage(job_id):
+    """
+    Get chat token usage for a job.
+    Returns current token usage and limit.
+    """
+    try:
+        ensure_managers_initialized()
+        
+        usage = database_manager.get_token_usage(job_id)
+        
+        if not usage:
+            # Create default token usage if doesn't exist
+            usage = database_manager.create_token_usage(
+                job_id=job_id,
+                token_limit=int(os.getenv('PANDASAI_TOKEN_LIMIT', 100000))
+            )
+        
+        return jsonify({
+            'success': True,
+            'data': usage.to_dict()
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error getting token usage for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jobs/<job_id>/token-usage', methods=['POST'])
+def update_token_usage(job_id):
+    """
+    Update chat token usage for a job.
+    Called by dashboard after each chat query.
+    """
+    try:
+        ensure_managers_initialized()
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        tokens_used = data.get('tokens_used')
+        if tokens_used is None:
+            return jsonify({'error': 'tokens_used is required'}), 400
+        
+        success = database_manager.update_token_usage(job_id, tokens_used)
+        
+        if success:
+            return jsonify({'success': True}), 200
+        else:
+            return jsonify({'error': 'Failed to update token usage'}), 500
+            
+    except Exception as e:
+        logger.error(f"Error updating token usage for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/jobs/<job_id>/token-usage', methods=['DELETE'])
+def reset_token_usage(job_id):
+    """
+    Reset chat token usage for a job (admin operation).
+    Requires admin API key for authentication.
+    """
+    try:
+        ensure_managers_initialized()
+        
+        # Check admin authorization
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Admin authorization required'}), 401
+        
+        token = auth_header.split(' ')[1]
+        if not config.admin_api_key or token != config.admin_api_key:
+            return jsonify({'error': 'Invalid admin API key'}), 403
+        
+        success = database_manager.reset_token_usage(job_id)
+        
+        if success:
+            logger.info(f"Token usage reset for job {job_id} by admin")
+            return jsonify({'success': True, 'message': 'Token usage reset'}), 200
+        else:
+            return jsonify({'error': 'Job not found or token usage not initialized'}), 404
+            
+    except Exception as e:
+        logger.error(f"Error resetting token usage for {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -1087,6 +1583,13 @@ def download_job_results(job_id):
                 'success': False,
                 'error': f'Job {job_id} not found'
             }), 404
+        
+        # Check if job is expired
+        if job.status == JobStatus.EXPIRED.value:
+            return jsonify({
+                'success': False,
+                'error': 'Job has expired. Results are no longer available.'
+            }), 410  # 410 Gone
         
         # Check if job is completed
         if job.status != JobStatus.COMPLETED.value:

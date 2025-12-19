@@ -1,10 +1,32 @@
 @import url('https://fonts.googleapis.com/css2?family=Irish+Grover&family=Roboto:wght@300;400;500;700&display=swap');
 
+html, body {
+    height: 100%;
+}
+
+/* Dash mounting points */
+#react-entry-point,
+#_dash-app-content,
+#_dash-global-error-container {
+    height: 100%;
+}
+
 body {
     background: #F5F7F5;
     font-family: 'Roboto', sans-serif;
     margin: 0;
     padding: 0;
+}
+
+@media (max-height: 900px) {
+    .main-title {
+        font-size: 2.0rem;
+        margin: 10px 0;
+    }
+    .panel {
+        margin: 12px;
+        padding: 12px;
+    }
 }
 
 .main-title {
@@ -466,4 +488,176 @@ body {
 
 .upload-component:active {
     transform: scale(0.98);
+}
+
+/* ========================================
+   Tutorial (driver.js) Styling
+   ======================================== */
+
+/* Custom popover styling to match gRINN theme */
+.grinn-tutorial-popover {
+    font-family: 'Roboto', sans-serif;
+}
+
+.driver-popover {
+    background-color: #f0f7f1 !important;
+    border: 2px solid #5A7A60 !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 24px rgba(90, 122, 96, 0.3) !important;
+}
+
+.driver-popover-title {
+    font-size: 1.1rem !important;
+    font-weight: 600 !important;
+    color: #4A6A50 !important;
+    margin-bottom: 10px !important;
+}
+
+.driver-popover-description {
+    font-size: 0.95rem !important;
+    color: #3A5A40 !important;
+    line-height: 1.5 !important;
+}
+
+.driver-popover-description strong {
+    color: #2A4A30;
+}
+
+/* Progress indicator */
+.driver-popover-progress-text {
+    font-size: 0.8rem !important;
+    color: #6A8A70 !important;
+}
+
+/* Navigation buttons - match app button style */
+.driver-popover-navigation-btns {
+    gap: 8px !important;
+}
+
+.driver-popover-next-btn,
+.driver-popover-close-btn-text {
+    background-color: #5A7A60 !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 5px !important;
+    padding: 8px 16px !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+    transition: background-color 0.2s ease !important;
+    box-shadow: none !important;
+    filter: none !important;
+    text-shadow: none !important;
+    outline: none !important;
+    -webkit-box-shadow: none !important;
+}
+
+.driver-popover-next-btn:hover,
+.driver-popover-close-btn-text:hover {
+    background-color: #4A6A50 !important;
+    box-shadow: none !important;
+    filter: none !important;
+}
+
+.driver-popover-next-btn:focus,
+.driver-popover-close-btn-text:focus {
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.driver-popover-prev-btn {
+    background-color: rgba(90, 122, 96, 0.1) !important;
+    border: 1px solid rgba(90, 122, 96, 0.3) !important;
+    color: #5A7A60 !important;
+    border-radius: 5px !important;
+    padding: 8px 16px !important;
+    font-weight: 500 !important;
+    font-size: 0.9rem !important;
+}
+
+.driver-popover-prev-btn:hover {
+    background-color: rgba(90, 122, 96, 0.2) !important;
+}
+
+/* X close button */
+.driver-popover-close-btn {
+    color: #6A8A70 !important;
+    font-size: 1.2rem !important;
+}
+
+.driver-popover-close-btn:hover {
+    color: #4A6A50 !important;
+}
+
+/* Lighter overlay for less contrast */
+.driver-overlay {
+    background-color: rgba(90, 122, 96, 0.15) !important;
+}
+
+/* Highlighted element stage */
+.driver-active-element {
+    box-shadow: 0 0 0 4px rgba(90, 122, 96, 0.4) !important;
+}
+
+/* Popover arrow - match popover background */
+.driver-popover-arrow-side-left::before,
+.driver-popover-arrow-side-left::after,
+.driver-popover-arrow-side-right::before,
+.driver-popover-arrow-side-right::after,
+.driver-popover-arrow-side-top::before,
+.driver-popover-arrow-side-top::after,
+.driver-popover-arrow-side-bottom::before,
+.driver-popover-arrow-side-bottom::after {
+    border-color: transparent !important;
+}
+
+.driver-popover-arrow-side-bottom::after {
+    border-bottom-color: #f0f7f1 !important;
+}
+
+.driver-popover-arrow-side-top::after {
+    border-top-color: #f0f7f1 !important;
+}
+
+.driver-popover-arrow-side-left::after {
+    border-left-color: #f0f7f1 !important;
+}
+
+.driver-popover-arrow-side-right::after {
+    border-right-color: #f0f7f1 !important;
+}
+
+/* Tutorial waiting indicator for action-based steps */
+.tutorial-waiting-indicator {
+    color: #5A7A60;
+    font-size: 0.85rem;
+    font-style: italic;
+    display: flex;
+    align-items: center;
+    animation: pulse-gentle 2s ease-in-out infinite;
+    flex: 1 1 100%;  /* Take full width on its own line */
+    order: -1;       /* Appear before buttons */
+    margin-bottom: 8px;
+}
+
+.tutorial-waiting-indicator i {
+    margin-right: 6px;
+    animation: point-bounce 1s ease-in-out infinite;
+}
+
+@keyframes pulse-gentle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes point-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-2px); }
+}
+
+/* Proper footer layout for tutorial waiting indicator */
+.driver-popover-footer {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    gap: 8px !important;
 }

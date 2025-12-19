@@ -1,0 +1,59 @@
+{
+  "title": "Job Monitor Tutorial",
+  "steps": [
+    {
+      "element": "#monitor-job-details",
+      "popover": {
+        "title": "Job Status Panel 📊",
+        "description": "Current status of your job: <strong>Queued</strong> (waiting in line), <strong>Running</strong> (actively processing), <strong>Completed</strong> (results ready), or <strong>Failed</strong> (check logs for errors). Also shows job ID, submission time, and duration.",
+        "side": "bottom",
+        "align": "center"
+      }
+    },
+    {
+      "element": "#monitor-job-logs",
+      "popover": {
+        "title": "Live Analysis Logs",
+        "description": "Watch real-time output from the gRINN analysis. Logs auto-scroll as new messages arrive. For running jobs, you'll see which analysis step is currently executing. Error messages appear here if something goes wrong.",
+        "side": "top",
+        "align": "center"
+      }
+    },
+    {
+      "element": "#manual-refresh-btn",
+      "popover": {
+        "title": "Manual Refresh",
+        "description": "The page auto-refreshes every 3 seconds while your job is running. Click here for an immediate refresh if you want to check status right away.",
+        "side": "top",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#monitor-launch-dashboard-btn",
+      "popover": {
+        "title": "Interactive Dashboard 🍀",
+        "description": "When your job completes, click here to launch the gRINN Dashboard! Explore your results with interactive heatmaps, network graphs, 3D molecular visualization, and an AI-powered chatbot for data analysis.",
+        "side": "top",
+        "align": "center"
+      }
+    },
+    {
+      "element": "#monitor-save-results-btn",
+      "popover": {
+        "title": "Download Results",
+        "description": "Download all results as a compressed archive for offline analysis, backup, or use with other tools. Includes interaction energy matrices, network metrics, and precomputed visualizations.",
+        "side": "top",
+        "align": "center"
+      }
+    },
+    {
+      "element": "#nav-queue-link",
+      "popover": {
+        "title": "View All Jobs",
+        "description": "Click here to see all your submitted jobs in the queue. You can monitor multiple jobs simultaneously and compare results.",
+        "side": "bottom",
+        "align": "start"
+      }
+    }
+  ]
+}

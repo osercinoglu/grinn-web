@@ -669,8 +669,10 @@ For local development without Docker:
    **Terminal 4 - Celery Worker (Optional - for job processing):**
    ```bash
    cd grinn-web
-   celery -A backend.tasks worker --loglevel=info
+   celery -A backend.tasks worker -B --loglevel=info
    ```
+   
+   > **Note:** The `-B` flag enables the embedded beat scheduler for periodic tasks like job cleanup.
 
 6. **Access the application:**
    - **Main Interface:** http://localhost:8051

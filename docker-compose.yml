@@ -37,6 +37,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.webapp
+    env_file:
+      - .env
     ports:
       - "8050:8050"  # Backend API
       - "8051:8051"  # Frontend Dashboard
@@ -101,15 +103,19 @@ services:
   # gRINN Dashboard Service (from grinn repository)
   grinn-dashboard:
     image: ${GRINN_DASHBOARD_IMAGE:-grinn-dashboard:latest}
+    command: ["dashboard", "/shared"]
+    env_file:
+      - .env
     ports:
-      - "8052:8052"
+      - "8052:8060"
     environment:
-      - DASHBOARD_PORT=8052
+      - DASHBOARD_PORT=8060
       - DASHBOARD_HOST=0.0.0.0
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # For chatbot DockerSandbox
       - grinn_shared:/shared:ro  # Shared volume with worker results
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8052/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8060/health"]
       interval: 30s
       timeout: 10s
       retries: 3

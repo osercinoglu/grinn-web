@@ -30,6 +30,31 @@ from pathlib import Path
 # Add shared modules to path
 sys.path.insert(0, str(Path(__file__).parent / 'shared'))
 
+def discover_grinn_images():
+    """
+    Discover all available grinn:gromacs-* Docker images on this system.
+    Returns list of dicts with 'tag' and 'version' keys.
+    """
+    try:
+        import docker
+        client = docker.from_env()
+        images = client.images.list()
+        grinn_images = []
+        
+        for img in images:
+            for tag in (img.tags or []):
+                if tag.startswith('grinn:gromacs-'):
+                    version = tag.replace('grinn:gromacs-', '')
+                    grinn_images.append({
+                        'tag': tag,
+                        'version': version
+                    })
+        
+        return grinn_images
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Could not discover GROMACS images: {e}")
+        return []
+
 def setup_logging(level=logging.INFO):
     """Setup logging configuration."""
     logging.basicConfig(
@@ -164,10 +189,14 @@ def register_worker(args, worker_id):
         docker_client = docker.from_env()
         docker_info = docker_client.info()
         
+        # Discover available GROMACS images
+        available_images = discover_grinn_images()
+        
         capabilities = {
             'cpu_cores': os.cpu_count(),
             'docker_cpus': docker_info.get('NCPU', 0),
             'docker_memory_gb': round(docker_info.get('MemTotal', 0) / (1024**3), 2),
+            'available_grinn_images': available_images,
         }
         
         metadata = {
@@ -207,7 +236,7 @@ def register_worker(args, worker_id):
         return False
 
 
-def heartbeat_loop(args, worker_id, stop_event):
+def heartbeat_loop(args, worker_id, stop_event, celery_app=None):
     """Background thread to send periodic heartbeats."""
     logger = logging.getLogger(__name__)
     
@@ -215,11 +244,35 @@ def heartbeat_loop(args, worker_id, stop_event):
     
     while not stop_event.is_set():
         try:
+            # Refresh available GROMACS images on each heartbeat
+            available_images = discover_grinn_images()
+            
+            # Get current job count from Celery
+            current_job_count = 0
+            if celery_app:
+                try:
+                    from celery.app.control import Inspect
+                    inspector = celery_app.control.inspect()
+                    active_tasks = inspector.active()
+                    if active_tasks:
+                        # Count tasks for this worker
+                        worker_hostname = f"{args.facility}-worker@"
+                        for hostname, tasks in active_tasks.items():
+                            if hostname.startswith(worker_hostname):
+                                current_job_count = len(tasks)
+                                break
+                except Exception as e:
+                    logger.debug(f"Failed to get job count from Celery: {e}")
+            
             response = requests.post(
                 heartbeat_url,
                 json={
                     'worker_id': worker_id,
-                    'status': 'active'
+                    'status': 'active',
+                    'current_job_count': current_job_count,
+                    'capabilities': {
+                        'available_grinn_images': available_images
+                    }
                 },
                 timeout=5
             )
@@ -230,38 +283,65 @@ def heartbeat_loop(args, worker_id, stop_event):
         except Exception as e:
             logger.debug(f"Heartbeat error: {e}")
         
-        # Wait for next heartbeat (every 60 seconds)
-        stop_event.wait(60)
+        # Wait for next heartbeat (using configured interval)
+        # Import config here to get the interval
+        try:
+            sys.path.insert(0, str(Path(__file__).parent / 'shared'))
+            from config import Config
+            config = Config()
+            interval = config.worker_heartbeat_interval_seconds
+        except:
+            interval = 60  # Default fallback
+        
+        stop_event.wait(interval)
 
 
 def run_worker(args, worker_id):
     """Run the Celery worker with heartbeat."""
     logger = logging.getLogger(__name__)
     
-    # Start heartbeat thread
-    stop_event = threading.Event()
-    heartbeat_thread = threading.Thread(
-        target=heartbeat_loop,
-        args=(args, worker_id, stop_event),
-        daemon=True
-    )
-    heartbeat_thread.start()
-    
     try:
-        # Import Celery tasks
+        # Import Celery tasks first
         sys.path.insert(0, str(Path(__file__).parent / 'backend'))
         from tasks import celery_app
+        
+        # Start heartbeat thread with celery_app reference
+        stop_event = threading.Event()
+        heartbeat_thread = threading.Thread(
+            target=heartbeat_loop,
+            args=(args, worker_id, stop_event, celery_app),
+            daemon=True
+        )
+        heartbeat_thread.start()
+        
+        # Discover available GROMACS versions and build queue list
+        available_images = discover_grinn_images()
+        version_queues = []
+        for img in available_images:
+            version = img['version']
+            queue_name = f"grinn_jobs_{version.replace('.', '_')}"
+            version_queues.append(queue_name)
+        
+        # Always include the default queue for backwards compatibility
+        if 'grinn_jobs' not in version_queues:
+            version_queues.append('grinn_jobs')
+        
+        queue_list = ','.join(version_queues)
         
         logger.info(f"🚀 Starting gRINN worker for facility: {args.facility}")
         logger.info(f"📡 Connected to frontend: {args.frontend_host}")
         logger.info(f"📁 Storage path: {args.storage_path}")
+        logger.info(f"🐳 Available GROMACS versions: {[img['version'] for img in available_images]}")
+        logger.info(f"📬 Listening on queues: {queue_list}")
         
-        # Run worker
+        # Run worker with version-specific queues and embedded beat scheduler
         celery_app.worker_main([
             'worker',
+            '-B',  # Enable embedded beat scheduler for periodic tasks
             '--loglevel=info',
             f'--concurrency={args.concurrency}',
-            f'--hostname={args.facility}-worker@%h'
+            f'--hostname={args.facility}-worker@%h',
+            f'--queues={queue_list}'
         ])
         
     except KeyboardInterrupt:

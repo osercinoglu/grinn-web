@@ -40,6 +40,7 @@ pytest-cov==6.0.0
 black==24.10.0
 flake8==7.1.1
 
-# Chat interface (pandasai)
+# Chat interface
 pandasai==3.0.0
 pandasai-litellm==0.0.1
+dash-chat

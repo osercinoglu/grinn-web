@@ -1,0 +1,89 @@
+{
+  "title": "Submit Job Tutorial",
+  "steps": [
+    {
+      "element": "#nav-home-link",
+      "popover": {
+        "title": "Welcome to i-gRINN! 🍀",
+        "description": "<strong>Welcome to i-gRINN!</strong> i-gRINN (interactive platform for (get) Residue Interaction eNergies and Networks) is a web-based tool for analysis of biomolecular dynamics simulation trajectories or conformational ensembles based on pairwise residue non-bonded interaction energies.<br><br>This interactive tutorial will guide you through submitting your first job. <strong>You'll perform real actions</strong> as we go!",
+        "side": "bottom",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#input-mode-selector",
+      "popover": {
+        "title": "Step 1: Select Input Mode",
+        "description": "<strong>Trajectory Mode:</strong> For MD simulations - requires structure (.pdb/.gro), trajectory (.xtc/.trr), and topology (.top) files.<br><br><strong>PDB Ensemble Mode:</strong> For multi-model PDB files - topology is auto-generated.<br><br>For this tutorial, we'll use the Trajectory Mode (default).",
+        "side": "bottom",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#load-example-data-btn",
+      "popover": {
+        "title": "Load Example Data",
+        "description": "Let's load some example data to test the system!<br><br><strong>👆 Click the 'Load Trajectory Example Data' button</strong> to continue.",
+        "side": "top",
+        "align": "center"
+      },
+      "waitForAction": {
+        "type": "click",
+        "selector": "#load-example-data-btn"
+      }
+    },
+    {
+      "element": "#file-list-display",
+      "popover": {
+        "title": "Files Loaded! ✓",
+        "description": "The example files have been loaded and validated. You can see:<br>• <strong>Structure file</strong> (.pdb/.gro) - protein coordinates<br>• <strong>Trajectory file</strong> (.xtc/.trr) - MD frames<br>• <strong>Topology file</strong> (.top) - force field parameters<br>• <strong>Include files</strong> (e.g. .itp) that are required by the topology file.",
+        "side": "left",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#toggle-parameters-btn",
+      "popover": {
+        "title": "Advanced Parameters",
+        "description": "You can customize analysis parameters here. Let's take a look!<br><br><strong> Click on <strong>Advanced Parameters</strong> button to expand the parameters panel.</strong>",
+        "side": "top",
+        "align": "start"
+      },
+      "waitForAction": {
+        "type": "click",
+        "selector": "#toggle-parameters-btn"
+      }
+    },
+    {
+      "element": "#parameters-content",
+      "popover": {
+        "title": "Analysis Parameters",
+        "description": "Here you can configure:<br>• <strong>Skip frames</strong> - the stride/skip to be applied to the input trajectory<br>• <strong>Initial pair filter cutoff</strong> - distance between centers of mass of residue pairs that determines which pairs will be included in the analysis. Computed using reference input structure<br>•  <strong>Atom selections</strong> - source and target residues. By default, all atoms <strong>except for solvent, ion, and water atoms</strong> are included.<br><br>Default values work well for most analyses. <strong>Note:</strong> No protein energy network analysis will be performed when non-default values for source and/or target residue selections are used.",
+        "side": "top",
+        "align": "center"
+      }
+    },
+    {
+      "element": "#submit-job-btn",
+      "popover": {
+        "title": "Ready to Submit!",
+        "description": "With all required files uploaded, the Submit button is now active (green).<br><br><strong>👆 Click 'Submit Job' to start the analysis!</strong>",
+        "side": "top",
+        "align": "center"
+      },
+      "waitForAction": {
+        "type": "click",
+        "selector": "#submit-job-btn"
+      }
+    },
+    {
+      "element": "#submission-status",
+      "popover": {
+        "title": "Job Submitted! 🎉",
+        "description": "Congratulations! Your job has been submitted to the processing queue.<br><br>You'll see a <strong>Job ID</strong> and a link to the monitoring page - bookmark it to track progress!<br><br><strong>Tip:</strong> Use the <strong>Job Queue</strong> to see all jobs, and check <strong>Help</strong> for documentation.<br><br>Happy analyzing! 🧬",
+        "side": "top",
+        "align": "center"
+      }
+    }
+  ]
+}

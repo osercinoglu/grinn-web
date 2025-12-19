@@ -399,12 +399,12 @@ class LocalStorageManager:
             logger.error(f"Failed to delete files for job {job_id}: {e}")
             return False
     
-    def cleanup_old_jobs(self, retention_hours: int = 72) -> int:
+    def cleanup_old_jobs(self, retention_hours: float = 72) -> int:
         """
         Delete job files older than the specified retention period.
         
         Args:
-            retention_hours: Hours to retain job files (default: 72 hours / 3 days)
+            retention_hours: Hours to retain job files (supports fractional hours for testing)
             
         Returns:
             Number of jobs cleaned up

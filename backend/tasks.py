@@ -185,43 +185,72 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                 except Exception as e:
                     logger.error(f"Failed to extract {zip_filename}: {e}")
             
-            # Analyze downloaded files to determine structure, topology, and trajectory
+            # Analyze downloaded files to determine structure, topology, trajectory, and ensemble PDB
             input_files = job.input_files or []
             structure_file = None
             topology_file = None
             trajectory_file = None
+            ensemble_pdb_file = None  # For ensemble mode: the multi-model PDB
             
             for file_info in input_files:
                 filename = file_info['filename']
                 file_type = file_info['file_type']
+                file_role = file_info.get('role', 'unknown')
                 
-                logger.info(f"Found {filename} ({file_type})")
+                logger.info(f"Found {filename} ({file_type}, role={file_role})")
                 
-                # Track file paths by type
-                if file_type in ['pdb', 'gro']:
+                # Track file paths by role (preferred) or type (fallback)
+                if file_role == 'ensemble_pdb':
+                    ensemble_pdb_file = filename
+                elif file_role == 'structure' or (file_role == 'unknown' and file_type in ['pdb', 'gro']):
                     structure_file = filename
-                elif file_type == 'top':
+                elif file_role == 'topology' or (file_role == 'unknown' and file_type == 'top'):
                     topology_file = filename
-                elif file_type in ['xtc', 'trr']:
+                elif file_role == 'trajectory' or (file_role == 'unknown' and file_type in ['xtc', 'trr']):
                     trajectory_file = filename
             
-            if not structure_file:
-                raise ValueError(f"No structure file found for job {job_id}")
+            # Validate required files based on mode
+            if input_mode == 'ensemble':
+                if not ensemble_pdb_file:
+                    raise ValueError(f"No ensemble PDB file found for job {job_id}. Ensemble mode requires a multi-model PDB file.")
+            else:
+                if not structure_file:
+                    raise ValueError(f"No structure file found for job {job_id}")
             
             # Run gRINN analysis in Docker container
             logger.info(f"Running gRINN analysis for job {job_id} in {input_mode} mode")
             docker_client = docker.from_env()
             
-            grinn_image = os.getenv('GRINN_DOCKER_IMAGE', 'grinn:gromacs-2024.1')
+            # Determine GROMACS version from job params (for trajectory mode)
+            default_version = os.getenv('GRINN_DOCKER_IMAGE', 'grinn:gromacs-2024.1')
+            gromacs_version = job_params.get('gromacs_version')
+            
+            if gromacs_version:
+                grinn_image = f"grinn:gromacs-{gromacs_version}"
+                logger.info(f"Using GROMACS version {gromacs_version} for job {job_id}")
+            else:
+                grinn_image = default_version
+                logger.info(f"Using default image {grinn_image} for job {job_id}")
+            
+            # Validate that the image exists
+            try:
+                docker_client.images.get(grinn_image)
+            except docker.errors.ImageNotFound:
+                raise ValueError(f"Docker image '{grinn_image}' not found. Please ensure GROMACS {gromacs_version or 'default'} is available on this worker.")
             
             # Build Docker command following grinn_workflow.py argument structure
             # The Docker entrypoint expects 'workflow' as the first argument,
             # then it internally calls: conda run -n grinn-env python -u grinn_workflow.py [args]
             # Positional arguments: structure_file out_folder
+            
+            # In ensemble mode, the ensemble PDB is the primary input file
+            # In trajectory mode, the structure file is the primary input
+            primary_input_file = ensemble_pdb_file if input_mode == 'ensemble' else structure_file
+            
             docker_command = [
-                'workflow',                   # Docker entrypoint mode
-                f'/input/{structure_file}',  # structure_file (positional)
-                '/output'                     # out_folder (positional)
+                'workflow',                         # Docker entrypoint mode
+                f'/input/{primary_input_file}',     # structure_file (positional) - ensemble PDB or structure
+                '/output'                           # out_folder (positional)
             ]
             
             # Input mode specific arguments
@@ -365,6 +394,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                         output_dir: {'bind': '/output', 'mode': 'rw'}
                     },
                     name=preflight_container_name,
+                    user=f'{os.getuid()}:{os.getgid()}',  # Run as host user for correct file ownership
                     remove=False,
                     detach=True,
                     stdout=True,
@@ -420,6 +450,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                     output_dir: {'bind': '/output', 'mode': 'rw'}
                 },
                 name=container_name,
+                user=f'{os.getuid()}:{os.getgid()}',  # Run as host user for correct file ownership
                 remove=False,  # Don't auto-remove so we can get logs
                 detach=True,   # Run in background
                 stdout=True,
@@ -497,7 +528,11 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
 def cleanup_old_jobs():
     """
     Cleanup old jobs and their associated files.
-    Uses JOB_FILE_RETENTION_HOURS from config (default: 72 hours / 3 days).
+    
+    Process:
+    1. Delete files for jobs older than JOB_FILE_RETENTION_HOURS
+    2. Mark those jobs as EXPIRED (instead of deleting DB records)
+    3. Delete EXPIRED job records older than EXPIRED_JOB_RETENTION_DAYS
     """
     # Initialize managers for this worker process
     local_db_manager = DatabaseManager()
@@ -506,16 +541,21 @@ def cleanup_old_jobs():
     
     try:
         retention_hours = local_config.job_file_retention_hours
-        logger.info(f"Starting job cleanup (retention: {retention_hours} hours)")
+        expired_retention_days = local_config.expired_job_retention_days
         
-        # Clean up old job files from storage
+        logger.info(f"Starting job cleanup (file retention: {retention_hours} hours, expired record retention: {expired_retention_days} days)")
+        
+        # Step 1: Clean up old job files from storage
         files_cleaned = local_storage_manager.cleanup_old_jobs(retention_hours=retention_hours)
         logger.info(f"Cleaned up files for {files_cleaned} old jobs")
         
-        # Clean up old job records from database (convert hours to days for DB method)
-        retention_days = max(1, retention_hours // 24)
-        db_cleaned = local_db_manager.cleanup_old_jobs(days_old=retention_days)
-        logger.info(f"Cleaned up {db_cleaned} old job records from database")
+        # Step 2: Mark terminal jobs as EXPIRED (files are now deleted)
+        expired_count = local_db_manager.mark_jobs_as_expired(hours_old=retention_hours)
+        logger.info(f"Marked {expired_count} jobs as expired")
+        
+        # Step 3: Delete expired job records that are too old
+        deleted_count = local_db_manager.delete_expired_jobs(days_old=expired_retention_days)
+        logger.info(f"Deleted {deleted_count} old expired job records from database")
             
     except Exception as e:
         logger.error(f"Job cleanup failed: {str(e)}")
@@ -541,11 +581,106 @@ def cleanup_job_files(job_id: str):
         logger.error(f"Failed to cleanup files for job {job_id}: {str(e)}")
 
 
-# Periodic task to cleanup old jobs (runs every 6 hours)
+@celery_app.task
+def monitor_worker_health():
+    """
+    Monitor worker health by checking heartbeats.
+    Mark workers as offline if they haven't sent heartbeat within timeout.
+    Redistribute jobs from offline workers back to the queue.
+    """
+    local_db_manager = DatabaseManager()
+    local_config = get_config()
+    
+    try:
+        timeout_seconds = local_config.worker_heartbeat_timeout_seconds
+        
+        # Mark workers as offline if no heartbeat
+        offline_count = local_db_manager.mark_workers_offline(timeout_seconds=timeout_seconds)
+        
+        if offline_count > 0:
+            logger.warning(f"Marked {offline_count} workers as offline due to missed heartbeats")
+            
+            # Get all offline workers
+            all_workers = local_db_manager.get_all_workers()
+            offline_workers = [w for w in all_workers if w.status == 'offline']
+            
+            # Redistribute jobs from offline workers
+            for worker in offline_workers:
+                jobs = local_db_manager.get_jobs_by_worker(worker.worker_id)
+                
+                if jobs:
+                    logger.info(f"Redistributing {len(jobs)} jobs from offline worker {worker.worker_id}")
+                    
+                    for job in jobs:
+                        # Reset job to QUEUED status and clear worker_id
+                        local_db_manager.update_job_status(
+                            job.id,
+                            JobStatus.QUEUED,
+                            current_step="Requeued due to worker failure"
+                        )
+                        # Clear worker assignment
+                        local_db_manager.set_worker_info(job.id, worker_id=None)
+                        # Decrement worker job count
+                        local_db_manager.decrement_worker_job_count(worker.worker_id)
+                        
+                        logger.info(f"Job {job.id} requeued after worker {worker.worker_id} went offline")
+        
+    except Exception as e:
+        logger.error(f"Worker health monitoring failed: {str(e)}")
+
+
+@celery_app.task
+def cleanup_idle_dashboards():
+    """
+    Clean up idle dashboard containers that haven't received heartbeats.
+    Uses the DashboardManager to stop containers that exceed idle timeout.
+    """
+    try:
+        from backend.dashboard_manager import DashboardManager
+        from backend.api import storage_manager, dashboard_manager
+        
+        # Use existing dashboard_manager from API if available, or create one
+        if dashboard_manager:
+            manager = dashboard_manager
+        else:
+            local_config = get_config()
+            local_storage_manager = get_storage_manager(local_config.storage_path)
+            manager = DashboardManager(local_storage_manager)
+        
+        cleanup_count = manager.cleanup_idle_dashboards()
+        
+        if cleanup_count > 0:
+            logger.info(f"Cleaned up {cleanup_count} idle dashboard containers")
+        
+    except Exception as e:
+        logger.error(f"Dashboard cleanup failed: {str(e)}")
+
+
+# Periodic task to cleanup old jobs
+# Schedule interval is configurable via CLEANUP_INTERVAL_SECONDS (default: 6 hours)
+_cleanup_config = get_config()
+logger.info(f"Cleanup scheduler configured: interval={_cleanup_config.cleanup_interval_seconds}s, "
+            f"file_retention={_cleanup_config.job_file_retention_hours}h, "
+            f"expired_retention={_cleanup_config.expired_job_retention_days}d")
+logger.info(f"Worker health monitoring: interval=60s, timeout={_cleanup_config.worker_heartbeat_timeout_seconds}s")
+logger.info(f"Dashboard cleanup: interval={_cleanup_config.dashboard_cleanup_interval_seconds}s, "
+            f"idle_timeout={_cleanup_config.dashboard_idle_timeout_minutes}min")
+
 celery_app.conf.beat_schedule = {
     'cleanup-old-jobs': {
         'task': 'backend.tasks.cleanup_old_jobs',
-        'schedule': 6 * 60 * 60,  # Every 6 hours
+        'schedule': _cleanup_config.cleanup_interval_seconds,
+        'options': {'queue': 'grinn_jobs'},  # Route to queue that workers listen to
+    },
+    'monitor-worker-health': {
+        'task': 'backend.tasks.monitor_worker_health',
+        'schedule': 60.0,  # Check every 60 seconds
+        'options': {'queue': 'grinn_jobs'},
+    },
+    'cleanup-idle-dashboards': {
+        'task': 'backend.tasks.cleanup_idle_dashboards',
+        'schedule': _cleanup_config.dashboard_cleanup_interval_seconds,
+        'options': {'queue': 'grinn_jobs'},
     },
 }
 celery_app.conf.timezone = 'UTC'

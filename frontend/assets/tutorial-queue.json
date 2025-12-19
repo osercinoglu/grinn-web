@@ -1,0 +1,50 @@
+{
+  "title": "Job Queue Tutorial",
+  "steps": [
+    {
+      "element": "#queue-search-input",
+      "popover": {
+        "title": "Job Queue Overview 📋",
+        "description": "This page shows all submitted jobs. Jobs are processed in order, with status updates in real-time. You can search for specific jobs by their unique ID.",
+        "side": "bottom",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#queue-status-filter",
+      "popover": {
+        "title": "Filter by Status",
+        "description": "Filter jobs by their current status: <strong>Queued</strong> (waiting), <strong>Running</strong> (processing), <strong>Completed</strong> (ready for results), or <strong>Failed</strong> (check logs for errors).",
+        "side": "bottom",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#queue-jobs-table",
+      "popover": {
+        "title": "Jobs Table",
+        "description": "Each row shows a job with its ID, custom name (if provided), current status, submission time, and duration. <strong>Click any row</strong> to open the detailed monitoring page with live logs.",
+        "side": "top",
+        "align": "center"
+      }
+    },
+    {
+      "element": "#queue-refresh-btn",
+      "popover": {
+        "title": "Refresh Queue",
+        "description": "The queue auto-refreshes every 10 seconds. Click here for an immediate manual refresh to see the latest status updates.",
+        "side": "left",
+        "align": "start"
+      }
+    },
+    {
+      "element": "#nav-home-link",
+      "popover": {
+        "title": "Submit New Job",
+        "description": "Ready to analyze more data? Click here to return to the submission page and start a new gRINN analysis.",
+        "side": "bottom",
+        "align": "start"
+      }
+    }
+  ]
+}

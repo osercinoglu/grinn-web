@@ -19,6 +19,7 @@ class JobStatus(Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 class FileType(Enum):
     """Supported input file types."""
@@ -264,3 +265,114 @@ class JobResponse:
     message: Optional[str] = None
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+
+
+@dataclass
+class Worker:
+    """Represents a computational worker node."""
+    worker_id: str
+    facility_name: Optional[str] = None
+    hostname: Optional[str] = None
+    max_concurrent_jobs: int = 2
+    current_job_count: int = 0
+    available_gromacs_versions: List[str] = field(default_factory=list)
+    last_heartbeat: Optional[datetime] = None
+    status: str = "online"  # online, offline, error
+    registered_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert worker to dictionary."""
+        return {
+            "worker_id": self.worker_id,
+            "facility_name": self.facility_name,
+            "hostname": self.hostname,
+            "max_concurrent_jobs": self.max_concurrent_jobs,
+            "current_job_count": self.current_job_count,
+            "available_gromacs_versions": self.available_gromacs_versions,
+            "last_heartbeat": self.last_heartbeat.isoformat() if self.last_heartbeat else None,
+            "status": self.status,
+            "registered_at": self.registered_at.isoformat(),
+            "updated_at": self.updated_at.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Worker":
+        """Create worker from dictionary."""
+        worker = cls(
+            worker_id=data["worker_id"],
+            facility_name=data.get("facility_name"),
+            hostname=data.get("hostname"),
+            max_concurrent_jobs=data.get("max_concurrent_jobs", 2),
+            current_job_count=data.get("current_job_count", 0),
+            available_gromacs_versions=data.get("available_gromacs_versions", []),
+            status=data.get("status", "online")
+        )
+        
+        if data.get("last_heartbeat"):
+            worker.last_heartbeat = datetime.fromisoformat(data["last_heartbeat"])
+        if data.get("registered_at"):
+            worker.registered_at = datetime.fromisoformat(data["registered_at"])
+        if data.get("updated_at"):
+            worker.updated_at = datetime.fromisoformat(data["updated_at"])
+            
+        return worker
+    
+    def has_capacity(self) -> bool:
+        """Check if worker has available capacity."""
+        return self.current_job_count < self.max_concurrent_jobs
+    
+    def is_healthy(self, timeout_seconds: int = 90) -> bool:
+        """Check if worker is healthy based on heartbeat."""
+        if not self.last_heartbeat or self.status != "online":
+            return False
+        time_since_heartbeat = (datetime.utcnow() - self.last_heartbeat).total_seconds()
+        return time_since_heartbeat < timeout_seconds
+
+
+@dataclass
+class ChatTokenUsage:
+    """Represents token usage tracking for a job's chat interface."""
+    job_id: str
+    tokens_used: int = 0
+    token_limit: int = 100000
+    last_updated: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "job_id": self.job_id,
+            "tokens_used": self.tokens_used,
+            "token_limit": self.token_limit,
+            "last_updated": self.last_updated.isoformat(),
+            "created_at": self.created_at.isoformat()
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ChatTokenUsage":
+        """Create from dictionary."""
+        usage = cls(
+            job_id=data["job_id"],
+            tokens_used=data.get("tokens_used", 0),
+            token_limit=data.get("token_limit", 100000)
+        )
+        
+        if data.get("last_updated"):
+            usage.last_updated = datetime.fromisoformat(data["last_updated"])
+        if data.get("created_at"):
+            usage.created_at = datetime.fromisoformat(data["created_at"])
+            
+        return usage
+    
+    def has_budget_remaining(self) -> bool:
+        """Check if there's budget remaining (0 = unlimited)."""
+        if self.token_limit <= 0:
+            return True
+        return self.tokens_used < self.token_limit
+    
+    def remaining_tokens(self) -> int:
+        """Get remaining tokens (negative means unlimited)."""
+        if self.token_limit <= 0:
+            return -1
+        return max(0, self.token_limit - self.tokens_used)
