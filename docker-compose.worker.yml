@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    user: root  # Required for Docker socket access
     environment:
       # Database connection to frontend server
       - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@${FRONTEND_HOST}:5432/grinn_web

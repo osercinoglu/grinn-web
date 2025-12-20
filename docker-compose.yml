@@ -80,6 +80,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    user: root  # Required for Docker socket access
     environment:
       - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@postgres:5432/grinn_web
       - REDIS_HOST=redis
