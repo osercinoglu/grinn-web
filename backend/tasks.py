@@ -393,6 +393,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                         input_dir: {'bind': '/input', 'mode': 'ro'},
                         output_dir: {'bind': '/output', 'mode': 'rw'}
                     },
+                    tmpfs={'/tmp': ''},  # Writable /tmp for non-root user
                     name=preflight_container_name,
                     user=f'{os.getuid()}:{os.getgid()}',  # Run as host user for correct file ownership
                     remove=False,
@@ -449,6 +450,7 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                     input_dir: {'bind': '/input', 'mode': 'ro'},
                     output_dir: {'bind': '/output', 'mode': 'rw'}
                 },
+                tmpfs={'/tmp': ''},  # Writable /tmp for non-root user
                 name=container_name,
                 user=f'{os.getuid()}:{os.getgid()}',  # Run as host user for correct file ownership
                 remove=False,  # Don't auto-remove so we can get logs

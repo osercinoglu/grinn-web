@@ -76,7 +76,7 @@ if docker images -q ${GRINN_DOCKER_IMAGE} | grep -q .; then
 else
     echo "⚠️  gRINN image not found: ${GRINN_DOCKER_IMAGE}"
     echo "📥 You may need to build or pull the gRINN image first"
-    echo "🔗 See: https://github.com/your-org/grinn for build instructions"
+    echo "🔗 See: https://github.com/osercinoglu/grinn for build instructions"
 fi
 
 # Build worker image
