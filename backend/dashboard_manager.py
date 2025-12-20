@@ -48,6 +48,12 @@ class DashboardManager:
         self.public_host = public_host or os.getenv('DASHBOARD_PUBLIC_HOST', app_config.public_host)
         self.idle_timeout_minutes = int(os.getenv('DASHBOARD_IDLE_TIMEOUT_MINUTES', '5'))  # Reduced from 30 to 5 for faster cleanup
         
+        # Auto-detect Docker network for container communication
+        # This is needed when running in Docker-in-Docker to ensure dashboard containers
+        # can be reached by the webapp via container name instead of localhost
+        self.docker_network = self._detect_docker_network()
+        self.config = app_config  # Store config reference for path translation
+        
         # Redis client for persistent state (optional)
         self.redis_client = redis_client
         
@@ -61,7 +67,54 @@ class DashboardManager:
         logger.info(f"DashboardManager initialized: ports {self.start_port}-{self.end_port}, "
                    f"image={self.docker_image}, max_instances={self.max_instances}, "
                    f"idle_timeout={self.idle_timeout_minutes}min, public_host={self.public_host}, "
+                   f"docker_network={self.docker_network or 'default'}, "
                    f"redis_persistence={'enabled' if self.redis_client else 'disabled'}")
+    
+    def _detect_docker_network(self) -> Optional[str]:
+        """
+        Auto-detect the Docker network this container is running on.
+        
+        Returns the network name if running inside Docker, None otherwise.
+        This allows dashboard containers to join the same network for direct communication.
+        """
+        try:
+            # Check if we're running inside a Docker container
+            hostname = os.environ.get('HOSTNAME', '')
+            if not hostname:
+                # Try reading from /etc/hostname
+                try:
+                    with open('/etc/hostname', 'r') as f:
+                        hostname = f.read().strip()
+                except (IOError, FileNotFoundError):
+                    pass
+            
+            if not hostname:
+                logger.info("Not running in Docker (no hostname detected), using localhost for dashboard access")
+                return None
+            
+            # Use docker inspect to get our container's network
+            result = subprocess.run(
+                ['docker', 'inspect', hostname, '--format', '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0 and result.stdout.strip():
+                network = result.stdout.strip()
+                logger.info(f"Detected Docker network: {network}")
+                return network
+            else:
+                # Container might exist but have no networks, or we're not in Docker
+                logger.info(f"Could not detect Docker network (hostname={hostname}), using localhost")
+                return None
+                
+        except subprocess.TimeoutExpired:
+            logger.warning("Timeout detecting Docker network, using localhost")
+            return None
+        except Exception as e:
+            logger.warning(f"Error detecting Docker network: {e}, using localhost")
+            return None
     
     @property
     def active_dashboards(self) -> Dict:
@@ -218,6 +271,17 @@ class DashboardManager:
                 'error': 'Job results not found or not yet available'
             }
         
+        # For Docker-in-Docker: translate container path to host path for child container mounts
+        # This is needed when webapp runs inside a container and spawns dashboard containers
+        container_storage_path = self.config.storage_path  # e.g., /data/grinn-jobs
+        host_storage_path = self.config.host_storage_path  # e.g., /home/onur/igrinn/grinn-jobs
+        
+        host_output_dir = job_output_dir
+        if host_storage_path and container_storage_path and host_storage_path != container_storage_path:
+            if job_output_dir.startswith(container_storage_path):
+                host_output_dir = job_output_dir.replace(container_storage_path, host_storage_path, 1)
+                logger.info(f"Dashboard path mapping: container={job_output_dir} -> host={host_output_dir}")
+        
         # Find available port
         port = self.get_next_available_port()
         if not port:
@@ -244,10 +308,14 @@ class DashboardManager:
                 '-d',  # Detached mode
                 '--name', container_name,
                 '-p', f"{port}:8060",  # Map to dashboard port (container listens on 8060)
-                '-v', f"{job_output_dir}:/data:ro",  # Mount results as read-only
+                '-v', f"{host_output_dir}:/data:ro",  # Mount results as read-only (use host path for Docker-in-Docker)
                 '-v', '/var/run/docker.sock:/var/run/docker.sock',  # For chatbot DockerSandbox
                 '--rm',  # Auto-remove when stopped
             ]
+            
+            # Join the same Docker network as webapp for direct container communication
+            if self.docker_network:
+                cmd.extend(['--network', self.docker_network])
 
             # Forward LLM/chatbot environment variables if available.
             # Note: these must be present in the webapp process env (e.g., via compose env_file).
@@ -506,7 +574,18 @@ class DashboardManager:
         try:
             # Make an HTTP request to the dashboard's actual path
             # Dashboard is configured with DASH_URL_BASE_PATHNAME=/api/dashboard/{job_id}/
-            url = f"http://127.0.0.1:{port}/api/dashboard/{job_id}/"
+            
+            # Use Docker DNS if on same network, otherwise localhost
+            info = self._active_dashboards_cache.get(job_id, {})
+            container_name = info.get('container_name', f'grinn-dashboard-{job_id}')
+            
+            if self.docker_network:
+                # Use container name for Docker networking (internal port 8060)
+                url = f"http://{container_name}:8060/api/dashboard/{job_id}/"
+            else:
+                # Use localhost for local development (mapped port)
+                url = f"http://127.0.0.1:{port}/api/dashboard/{job_id}/"
+            
             response = requests.get(url, timeout=2)
             
             # Dashboard is ready if we get any successful response (200-299)

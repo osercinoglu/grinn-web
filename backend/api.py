@@ -1274,7 +1274,17 @@ def proxy_dashboard(job_id, subpath):
         # Build the target URL
         # The dashboard container is configured with DASH_URL_BASE_PATHNAME=/api/dashboard/{job_id}/
         # So we must forward the full path including the prefix
-        target_url = f"http://127.0.0.1:{port}/api/dashboard/{job_id}/{subpath}"
+        container_name = info.get('container_name', f'grinn-dashboard-{job_id}')
+        
+        # If we're on the same Docker network, use container name for direct communication
+        # Otherwise fall back to localhost with port mapping
+        if dashboard_manager.docker_network:
+            # Use container name as hostname (Docker DNS) with internal port 8060
+            target_url = f"http://{container_name}:8060/api/dashboard/{job_id}/{subpath}"
+        else:
+            # Fallback for non-Docker environments (local development)
+            target_url = f"http://127.0.0.1:{port}/api/dashboard/{job_id}/{subpath}"
+        
         if request.query_string:
             target_url += f"?{request.query_string.decode('utf-8')}"
         

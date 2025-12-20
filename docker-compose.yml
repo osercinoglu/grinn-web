@@ -58,6 +58,8 @@ services:
       - FRONTEND_PORT=8051
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
       - STORAGE_PATH=/data/grinn-jobs
+      # HOST_STORAGE_PATH is the path on the Docker HOST for volume mounts to child containers (dashboards)
+      - HOST_STORAGE_PATH=${STORAGE_PATH}
       - WORKER_REGISTRATION_TOKEN=${WORKER_REGISTRATION_TOKEN}
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
       - EXAMPLE_DATA_PATH_TRAJECTORY=/app/example_data/trajectory

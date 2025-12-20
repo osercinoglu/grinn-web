@@ -58,6 +58,44 @@ def _get_example_files(path: str) -> list:
     except Exception:
         return []
 
+def _validate_example_path(file_path: str) -> bool:
+    """
+    Validate that a file path is within the configured example data directories.
+    Prevents path traversal attacks.
+    
+    Args:
+        file_path: The file path to validate
+        
+    Returns:
+        True if the path is valid and within allowed example data directories
+    """
+    if not file_path:
+        return False
+    
+    # Normalize the path to resolve any .. or symlinks
+    try:
+        normalized_path = os.path.realpath(file_path)
+    except Exception:
+        return False
+    
+    # Check if file exists
+    if not os.path.isfile(normalized_path):
+        return False
+    
+    # Check against allowed example data paths
+    allowed_paths = []
+    if config.example_data_path_trajectory:
+        allowed_paths.append(os.path.realpath(config.example_data_path_trajectory))
+    if config.example_data_path_ensemble:
+        allowed_paths.append(os.path.realpath(config.example_data_path_ensemble))
+    
+    # Verify the file is within one of the allowed directories
+    for allowed in allowed_paths:
+        if normalized_path.startswith(allowed + os.sep) or normalized_path.startswith(allowed):
+            return True
+    
+    return False
+
 EXAMPLE_DATA_TRAJECTORY_AVAILABLE = _check_example_data_available(config.example_data_path_trajectory)
 EXAMPLE_DATA_ENSEMBLE_AVAILABLE = _check_example_data_available(config.example_data_path_ensemble)
 
@@ -1757,7 +1795,7 @@ def create_file_upload_section():
                                     html.Td(f"max {config.max_trajectory_file_size_mb} MB", style={'textAlign': 'left', 'paddingBottom': '6px'})
                                 ]),
                                 html.Tr([
-                                    html.Td("Structure/topology files (.pdb/.gro/.top/.itp):", style={'textAlign': 'left', 'paddingRight': '15px', 'paddingBottom': '6px', 'fontWeight': '500', 'whiteSpace': 'nowrap'}),
+                                    html.Td("Structure/topology files (.pdb/.top/.itp):", style={'textAlign': 'left', 'paddingRight': '15px', 'paddingBottom': '6px', 'fontWeight': '500', 'whiteSpace': 'nowrap'}),
                                     html.Td(f"max {config.max_other_file_size_mb} MB", style={'textAlign': 'left', 'paddingBottom': '6px'})
                                 ]),
                                 html.Tr([
@@ -1900,9 +1938,28 @@ def create_submit_section():
                     'borderColor': '#5A7A60',
                     'boxShadow': '0 4px 8px rgba(90, 122, 96, 0.3)',
                     'transition': 'all 0.3s ease'
-                })
+                }),
+                # Privacy setting - directly below Submit button
+                html.Div([
+                    dcc.Checklist(
+                        id="privacy-setting",
+                        options=[{
+                            'label': html.Span([
+                                "Make job public (visible in Job Queue)"
+                            ], style={'fontSize': '0.85rem', 'color': '#666'}),
+                            'value': 'public'
+                        }],
+                        value=[],  # Empty = unchecked = private by default
+                        className="form-check",
+                        style={'display': 'inline-block'}
+                    ),
+                    html.Div([
+                        html.Small("Jobs are private by default. Bookmark your job monitoring page to track progress.", 
+                                  style={'color': '#8A9A8A', 'fontSize': '0.8rem'})
+                    ], style={'marginTop': '4px'})
+                ], style={'marginTop': '10px', 'textAlign': 'center'})
             ], style={'flex': '1', 'paddingLeft': '15px'})
-        ], style={'display': 'flex', 'gap': '15px', 'alignItems': 'center', 'marginBottom': '15px'}),
+        ], style={'display': 'flex', 'gap': '15px', 'alignItems': 'flex-start', 'marginBottom': '15px'}),
         
         # Status message for submit requirements (full width below)
         html.Div([
@@ -1982,26 +2039,6 @@ def create_submit_section():
                             className="form-input",
                             style={'width': '100%'}
                         )
-                    ], className="form-group"),
-                    
-                    html.Div([
-                        dcc.Checklist(
-                            id="privacy-setting",
-                            options=[{
-                                'label': html.Span([
-                                    html.I(className="fas fa-lock", style={'marginRight': '8px', 'color': '#5A7A60'}),
-                                    "Keep job details private"
-                                ], style={'fontSize': '0.9rem'}),
-                                'value': 'private'
-                            }],
-                            value=[],
-                            className="form-check"
-                        ),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '5px', 'color': '#FFA500', 'fontSize': '0.8rem'}),
-                            html.Small("Private jobs appear in the job queue as 'Private job'. Bookmark the monitoring page to access details later!", 
-                                      style={'color': '#8A9A8A', 'fontSize': '0.8rem'})
-                        ], style={'marginTop': '5px', 'display': 'flex', 'alignItems': 'flex-start'})
                     ], className="form-group")
                 ], style={'flex': '1', 'paddingLeft': '15px'})
             ], style={'display': 'flex', 'gap': '15px'})
@@ -2016,16 +2053,13 @@ def create_job_monitoring_page(job_id: str):
     """Create dedicated job monitoring page."""
     current_path = f"/monitor/{job_id}"
     # Build full URL using configured base URL or fallback to relative path
+    # The client-side callback will update this dynamically with the actual browser URL
     if config.frontend_base_url:
         base = config.frontend_base_url.rstrip('/')
         full_url = f"{base}{current_path}"
     else:
-        # Fallback: try to get from Flask request context
-        try:
-            from flask import request
-            full_url = request.url
-        except (ImportError, RuntimeError):
-            full_url = current_path  # Fallback to relative path
+        # Use relative path as safe fallback - client-side callback will update with actual URL
+        full_url = current_path
     
     return html.Div([
         dcc.Location(id='monitor-url', refresh=False),
@@ -2040,7 +2074,7 @@ def create_job_monitoring_page(job_id: str):
             # Header with navigation
             create_header(),
             
-            # Bookmark reminder
+            # Bookmark reminder - URL is updated dynamically via client-side callback
             html.Div([
                 html.Div([
                     html.I(className="fas fa-bookmark", style={'marginRight': '10px', 'fontSize': '0.9rem'}),
@@ -2048,7 +2082,7 @@ def create_job_monitoring_page(job_id: str):
                     "Save this URL to check your job status anytime:"
                 ]),
                 html.Div([
-                    html.A(full_url, href=full_url, target="_blank", 
+                    html.A(full_url, id='bookmark-url-link', href=full_url, target="_blank", 
                            style={'backgroundColor': 'rgba(255,255,255,0.3)', 'padding': '4px 8px', 'borderRadius': '4px', 
                                   'fontSize': '0.9rem', 'color': 'white', 'textDecoration': 'none', 'fontFamily': 'monospace',
                                   'wordBreak': 'break-all'})
@@ -2485,6 +2519,22 @@ app.clientside_callback(
     prevent_initial_call=False
 )
 
+# Client-side callback to update bookmark URL with actual browser URL
+# This ensures the bookmark link always shows the correct URL regardless of server-side config
+app.clientside_callback(
+    """
+    function(pathname) {
+        // Get the full browser URL (origin + pathname)
+        var fullUrl = window.location.origin + pathname;
+        return [fullUrl, fullUrl];
+    }
+    """,
+    [Output('bookmark-url-link', 'children'),
+     Output('bookmark-url-link', 'href')],
+    Input('monitor-url', 'pathname'),
+    prevent_initial_call=False
+)
+
 
 # Main layout with URL routing
 app.layout = html.Div([
@@ -2643,7 +2693,7 @@ def update_mode_instructions(mode):
                 html.Div([
                     html.Strong("Required: "),
                     html.Ul([
-                        html.Li("Structure (.pdb/.gro)", style={'margin': '2px 0'}),
+                        html.Li("Structure (.pdb)", style={'margin': '2px 0'}),
                         html.Li(f"Trajectory (.xtc/.trr, max {config.max_trajectory_file_size_mb}MB)", style={'margin': '2px 0'}),
                         html.Li("Topology (.top)", style={'margin': '2px 0'})
                     ], style={'fontSize': '0.85rem', 'marginTop': '5px', 'marginBottom': '5px', 'paddingLeft': '20px'})
@@ -2770,7 +2820,7 @@ def update_file_size_limits_info(mode):
                     html.Td(f"max {config.max_trajectory_file_size_mb} MB", style=value_cell_style)
                 ]),
                 html.Tr([
-                    html.Td("Structure/topology files (.pdb/.gro/.top/.itp):", style=label_cell_style),
+                    html.Td("Structure/topology files (.pdb/.top/.itp):", style=label_cell_style),
                     html.Td(f"max {config.max_other_file_size_mb} MB", style=value_cell_style)
                 ]),
                 html.Tr([
@@ -2938,6 +2988,7 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
             'filename': filename,
             'temp_file_id': temp_file_id,  # Reference to server-side file
             'session_id': session_id,
+            'source': 'upload',  # Flag to indicate user upload (not example data)
             'size_bytes': file_size,
             'file_type': file_type.value,
             'upload_time': datetime.utcnow().isoformat(),
@@ -3419,38 +3470,45 @@ app.clientside_callback(
 
 @app.callback(
     [Output('uploaded-files-store', 'data', allow_duplicate=True),
-     Output('file-rejection-warning', 'children', allow_duplicate=True)],
+     Output('file-rejection-warning', 'children', allow_duplicate=True),
+     Output('privacy-setting', 'value', allow_duplicate=True)],
     [Input('confirm-load-example-btn', 'n_clicks')],
     [State('session-id-store', 'data'),
      State('input-mode-selector', 'value')],
     prevent_initial_call=True
 )
 def load_example_data(n_clicks, session_id, input_mode):
-    """Load example data files from configured path based on current mode."""
+    """Load example data files from configured path based on current mode.
+    
+    Example data files are NOT copied to temp storage. Instead, metadata stores
+    the original file path with source='example'. This avoids session expiry issues
+    and reduces disk I/O.
+    
+    Example data jobs are automatically set to public for demonstration purposes.
+    """
     mode = input_mode or 'trajectory'
     
     # Determine availability and path for current mode
     if mode == 'ensemble':
         data_available = EXAMPLE_DATA_ENSEMBLE_AVAILABLE
-        example_path = config.example_data_path_ensemble
+        example_data_dir = config.example_data_path_ensemble
     else:
         data_available = EXAMPLE_DATA_TRAJECTORY_AVAILABLE
-        example_path = config.example_data_path_trajectory
+        example_data_dir = config.example_data_path_trajectory
     
-    if not n_clicks or not data_available or not example_path:
-        return no_update, no_update
+    if not n_clicks or not data_available or not example_data_dir:
+        return no_update, no_update, no_update
     
-    # Clear existing session files
-    if session_id:
-        cleanup_session_files(session_id)
+    # Note: We don't clear session files here since example data doesn't use temp storage.
+    # The uploaded-files-store will be completely replaced with example data below.
     
     # Read files from example data path
     example_files = []
     rejected_files = []
     
     try:
-        for filename in os.listdir(example_path):
-            file_path = os.path.join(example_path, filename)
+        for filename in os.listdir(example_data_dir):
+            file_path = os.path.join(example_data_dir, filename)
             if not os.path.isfile(file_path):
                 continue
             
@@ -3494,14 +3552,6 @@ def load_example_data(n_clicks, session_id, input_mode):
                 })
                 continue
             
-            # Read file content and save to session temp storage
-            with open(file_path, 'rb') as f:
-                content = f.read()
-            
-            # Save to session temp storage (reuse existing function pattern)
-            content_b64 = base64.b64encode(content).decode('utf-8')
-            temp_file_id = save_temp_file(content_b64, filename, session_id)
-            
             # Determine file role based on mode and file type
             if mode == 'ensemble' and ext == 'pdb':
                 file_role = 'ensemble_pdb'
@@ -3514,11 +3564,12 @@ def load_example_data(n_clicks, session_id, input_mode):
             else:
                 file_role = 'other'
             
-            # Build file metadata
+            # Build file metadata - store source path instead of temp file
+            # This bypasses temp storage entirely for example data
             example_files.append({
                 'filename': filename,
-                'temp_file_id': temp_file_id,
-                'session_id': session_id,
+                'example_path': file_path,  # Direct path to example file
+                'source': 'example',  # Flag to indicate example data (not user upload)
                 'size_bytes': size_bytes,
                 'file_type': file_type,
                 'upload_time': datetime.now().isoformat(),
@@ -3535,7 +3586,7 @@ def load_example_data(n_clicks, session_id, input_mode):
                 html.I(className="fas fa-exclamation-circle", style={'marginRight': '10px', 'color': '#dc3545'}),
                 f"Error loading example data: {str(e)}"
             ], className="alert alert-danger")
-        ])
+        ]), no_update
     
     # Build rejection warning if any files were rejected
     rejection_warning = []
@@ -3555,7 +3606,8 @@ def load_example_data(n_clicks, session_id, input_mode):
         ], className="alert alert-warning", style={'marginBottom': '15px', 'padding': '15px', 'borderRadius': '8px'})
     
     logger.info(f"Loaded {len(example_files)} example files")
-    return example_files, rejection_warning
+    # Example data jobs are automatically set to public for demonstration purposes
+    return example_files, rejection_warning, ['public']
 
 
 # Separate callback to update display when files are removed or mode changes
@@ -3984,7 +4036,8 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 'role': role
             })
         
-        is_private = 'private' in (privacy_setting or [])
+        # Privacy: jobs are private by default, public only if checkbox is checked
+        is_private = 'public' not in (privacy_setting or [])
         
         backend_url = f"{config.backend_url}/api/create-job"
         logger.info(f"Creating job via {backend_url}")
@@ -4024,30 +4077,56 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         
         # Step 2: Upload files to backend local storage
         for file_data in files_for_submission:
-            # Get file content from temp storage (not from base64 in store)
-            temp_file_id = file_data.get('temp_file_id')
-            file_session_id = file_data.get('session_id', session_id)
+            content = None
             
-            if temp_file_id and file_session_id:
-                # Read from temp file
-                temp_file_path = get_temp_file_path(temp_file_id, file_session_id)
-                if temp_file_path and os.path.exists(temp_file_path):
-                    with open(temp_file_path, 'rb') as f:
-                        content = f.read()
-                else:
-                    logger.error(f"Temp file not found: {temp_file_path}")
+            # Check if this is example data (source='example') or user upload
+            if file_data.get('source') == 'example':
+                # Example data: read directly from example_path
+                example_path = file_data.get('example_path')
+                
+                # Security: validate path is within allowed example data directories
+                if not example_path or not _validate_example_path(example_path):
+                    logger.error(f"Invalid example path: {example_path}")
                     return html.Div([
                         html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
-                        f"File expired or not found: {file_data['filename']}. Please re-upload."
+                        f"Example file path validation failed: {file_data['filename']}. Please reload example data."
                     ], className="alert alert-danger"), no_update
-            elif 'content' in file_data:
-                # Fallback: decode from base64 content (legacy support)
+                
                 try:
-                    content = base64.b64decode(file_data['content'])
+                    with open(example_path, 'rb') as f:
+                        content = f.read()
                 except Exception as e:
-                    logger.error(f"Failed to decode file {file_data['filename']}: {e}")
-                    continue
+                    logger.error(f"Failed to read example file {example_path}: {e}")
+                    return html.Div([
+                        html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                        f"Failed to read example file: {file_data['filename']}. Please reload example data."
+                    ], className="alert alert-danger"), no_update
             else:
+                # User upload: read from temp storage
+                temp_file_id = file_data.get('temp_file_id')
+                file_session_id = file_data.get('session_id', session_id)
+                
+                if temp_file_id and file_session_id:
+                    # Read from temp file
+                    temp_file_path = get_temp_file_path(temp_file_id, file_session_id)
+                    if temp_file_path and os.path.exists(temp_file_path):
+                        with open(temp_file_path, 'rb') as f:
+                            content = f.read()
+                    else:
+                        logger.error(f"Temp file not found: {temp_file_path}")
+                        return html.Div([
+                            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+                            f"File expired or not found: {file_data['filename']}. Please re-upload."
+                        ], className="alert alert-danger"), no_update
+                elif 'content' in file_data:
+                    # Fallback: decode from base64 content (legacy support)
+                    try:
+                        content = base64.b64decode(file_data['content'])
+                    except Exception as e:
+                        logger.error(f"Failed to decode file {file_data['filename']}: {e}")
+                        continue
+            
+            if content is None:
                 logger.error(f"No content available for file {file_data['filename']}")
                 continue
             
@@ -4065,9 +4144,12 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 
                 if upload_response.status_code == 200:
                     logger.info(f"Successfully uploaded {file_data['filename']}")
-                    # Delete temp file after successful upload
-                    if temp_file_id and file_session_id:
-                        delete_temp_file(temp_file_id, file_session_id)
+                    # Delete temp file after successful upload (only for user uploads, not example data)
+                    if file_data.get('source') != 'example':
+                        temp_file_id = file_data.get('temp_file_id')
+                        file_session_id = file_data.get('session_id', session_id)
+                        if temp_file_id and file_session_id:
+                            delete_temp_file(temp_file_id, file_session_id)
                 else:
                     error_msg = f"Upload failed for {file_data['filename']}: {upload_response.status_code}"
                     logger.error(error_msg)
