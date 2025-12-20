@@ -27,13 +27,16 @@ from shared.config import get_config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Get configuration (needed for Redis connection)
+config = get_config()
+
 # Initialize Celery app
 celery_app = Celery('grinn_worker')
 
-# Configure Celery
+# Configure Celery - use config for Redis connection to support Docker deployment
 celery_config = {
-    'broker_url': 'redis://localhost:6379/0',
-    'result_backend': 'redis://localhost:6379/0',
+    'broker_url': f'redis://{config.redis_host}:{config.redis_port}/0',
+    'result_backend': f'redis://{config.redis_host}:{config.redis_port}/0',
     'task_serializer': 'json',
     'accept_content': ['json'],
     'result_serializer': 'json',
@@ -45,9 +48,6 @@ celery_config = {
     'task_time_limit': 3600,
 }
 celery_app.conf.update(celery_config)
-
-# Get configuration
-config = get_config()
 
 # Initialize database and storage
 db_manager = DatabaseManager()

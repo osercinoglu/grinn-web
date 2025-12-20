@@ -1359,7 +1359,7 @@ def fetch_gromacs_versions(mode, tab_focus_trigger):
     
     try:
         # Call the API to get available versions
-        backend_url = f"http://localhost:{config.backend_port}/api/gromacs-versions"
+        backend_url = f"{config.backend_url}/api/gromacs-versions"
         response = requests.get(backend_url, timeout=5)
         
         if response.status_code == 200:

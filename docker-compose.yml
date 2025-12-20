@@ -49,15 +49,20 @@ services:
       - REDIS_DB=0
       - BACKEND_HOST=0.0.0.0
       - BACKEND_PORT=8050
+      - BACKEND_URL=http://localhost:8050
+      - BACKEND_PUBLIC_URL=${BACKEND_PUBLIC_URL:-http://localhost:8050}
       - FRONTEND_HOST=0.0.0.0
       - FRONTEND_PORT=8051
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-in-production}
       - STORAGE_PATH=/data/grinn-jobs
       - WORKER_REGISTRATION_TOKEN=${WORKER_REGISTRATION_TOKEN}
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
+      - EXAMPLE_DATA_PATH_TRAJECTORY=/app/example_data/trajectory
+      - EXAMPLE_DATA_PATH_ENSEMBLE=/app/example_data/ensemble
     volumes:
       - grinn_storage:/data/grinn-jobs
       - webapp_logs:/app/logs
+      - ${EXAMPLE_DATA_PATH:-./example_data}:/app/example_data:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -518,21 +518,47 @@ For traditional single-machine deployment:
    
    # Create secrets directory for production credentials
    mkdir -p secrets
+   
+   # Create example data directory structure
+   mkdir -p example_data/trajectory example_data/ensemble
    ```
 
-3. **Build Docker images:**
+3. **Configure example data (for "Load Example" buttons):**
    ```bash
-   # Build all images (includes building gRINN dashboard if available)
-   ./build-docker.sh
+   # Place your trajectory mode example files in:
+   # example_data/trajectory/ (should contain .pdb, .xtc/.trr, .top files)
+   
+   # Place your ensemble mode example files in:
+   # example_data/ensemble/ (should contain multi-model .pdb file)
+   
+   # Update .env with the path (already set by default in docker-compose):
+   # EXAMPLE_DATA_PATH=./example_data
    ```
 
-4. **Start all services:**
+4. **Build Docker images:**
+   ```bash
+   # Build all images (webapp, worker, dashboard, and all GROMACS versions)
+   # This will take several hours and require ~50GB disk space
+   ./build-docker.sh
+   
+   # Build options:
+   ./build-docker.sh --help           # Show all options
+   ./build-docker.sh --no-cache       # Build without Docker cache
+   ./build-docker.sh --skip-grinn     # Only build webapp and worker (fast)
+   ./build-docker.sh --skip-webapp    # Only build gRINN GROMACS images
+   ```
+   
+   The script builds 18 GROMACS versions (2020.7 through 2025.2) plus the
+   dashboard-only image. The frontend automatically discovers available
+   versions and displays them in the GROMACS version dropdown.
+
+5. **Start all services:**
    ```bash
    # Start the complete stack
    docker-compose up -d
    ```
 
-5. **Verify deployment:**
+6. **Verify deployment:**
    ```bash
    # Check service health
    docker-compose ps
@@ -541,7 +567,7 @@ For traditional single-machine deployment:
    docker-compose logs webapp
    ```
 
-6. **Access the service:**
+7. **Access the service:**
    - **Main Interface:** http://localhost:8050
    - **Job Queue:** http://localhost:8050/queue  
    - **gRINN Dashboard:** http://localhost:8051
@@ -550,14 +576,22 @@ For traditional single-machine deployment:
 
 For production deployment, configure:
 
-1. **Storage path:**
+1. **Public URL settings (required for remote access):**
+   ```bash
+   # Set your server's public IP or domain in .env:
+   BACKEND_PUBLIC_URL=http://YOUR_SERVER_IP:8050
+   # If using a reverse proxy:
+   # BACKEND_PUBLIC_URL=https://your-domain.com/api
+   ```
+
+2. **Storage path:**
    ```bash
    # Update .env with your storage settings:
    STORAGE_PATH=/data/grinn-jobs  # Local storage path for job files
    JOB_FILE_RETENTION_HOURS=72    # Job files deleted after this time
    ```
 
-2. **Security settings:**
+3. **Security settings:**
    ```bash
    # Generate strong passwords in .env
    POSTGRES_PASSWORD=your-secure-password
@@ -568,7 +602,7 @@ For production deployment, configure:
    WORKER_REGISTRATION_TOKEN=your-generated-token
    ```
 
-3. **Resource limits:**
+4. **Resource limits:**
    ```yaml
    # Adjust in docker-compose.yml
    services:
