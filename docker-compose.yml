@@ -60,7 +60,7 @@ services:
       - EXAMPLE_DATA_PATH_TRAJECTORY=/app/example_data/trajectory
       - EXAMPLE_DATA_PATH_ENSEMBLE=/app/example_data/ensemble
     volumes:
-      - grinn_storage:/data/grinn-jobs
+      - ${STORAGE_PATH:-./storage}:/data/grinn-jobs
       - webapp_logs:/app/logs
       - ${EXAMPLE_DATA_PATH:-./example_data}:/app/example_data:ro
     depends_on:
@@ -93,7 +93,7 @@ services:
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - grinn_storage:/data/grinn-jobs
+      - ${STORAGE_PATH:-./storage}:/data/grinn-jobs
       - worker_logs:/app/logs
       - grinn_shared:/shared  # Shared volume with gRINN dashboard
     depends_on:
@@ -148,7 +148,6 @@ volumes:
   webapp_logs:
   webapp_uploads:
   worker_logs:
-  grinn_storage:
   grinn_shared:
 
 networks:

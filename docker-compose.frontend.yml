@@ -63,7 +63,7 @@ services:
       - EXAMPLE_DATA_PATH_TRAJECTORY=/app/example_data/trajectory
       - EXAMPLE_DATA_PATH_ENSEMBLE=/app/example_data/ensemble
     volumes:
-      - grinn_storage:/data/grinn-jobs
+      - ${STORAGE_PATH:-./storage}:/data/grinn-jobs
       - webapp_logs:/app/logs
       - ${EXAMPLE_DATA_PATH:-./example_data}:/app/example_data:ro
     depends_on:
@@ -109,8 +109,6 @@ volumes:
   redis_data:
     driver: local
   webapp_logs:
-    driver: local
-  grinn_storage:
     driver: local
   grinn_dashboard_logs:
     driver: local
