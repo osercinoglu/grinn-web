@@ -921,9 +921,11 @@ def get_gromacs_versions():
                         if version not in version_workers:
                             version_workers[version] = []
                         version_workers[version].append(worker_id)
-        else:
+        
+        # Fall back to local discovery if no versions found from workers
+        if not version_workers:
             # Local development mode: discover images on this machine
-            logger.info("No remote workers registered, using local Docker image discovery")
+            logger.info("No versions from workers, falling back to local Docker image discovery")
             is_local_mode = True
             local_images = discover_local_grinn_images()
             
