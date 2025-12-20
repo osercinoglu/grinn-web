@@ -44,7 +44,7 @@ class JobQueue:
             timezone='UTC',
             enable_utc=True,
             task_routes={
-                'grinn_web.process_grinn_job': {'queue': 'grinn_jobs'},
+                'backend.tasks.process_grinn_job': {'queue': 'grinn_jobs'},
             },
             worker_prefetch_multiplier=1,
             task_acks_late=True,
@@ -87,7 +87,7 @@ class JobQueue:
             
             # Submit to Celery
             task = self.celery_app.send_task(
-                'grinn_web.process_grinn_job',
+                'backend.tasks.process_grinn_job',
                 args=[job.job_id],
                 queue='grinn_jobs',
                 task_id=f"grinn_{job.job_id}"

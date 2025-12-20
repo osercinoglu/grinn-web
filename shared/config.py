@@ -50,6 +50,9 @@ class Config:
     
     # Local storage settings (use NFS mount for multi-worker setups)
     storage_path: str = None  # Will default to ~/.grinn-jobs or /data/grinn-jobs
+    # Host storage path for Docker-in-Docker: when worker runs inside a container,
+    # this is the HOST path that child containers (gRINN) need to mount
+    host_storage_path: str = None
     
     # Worker registration settings
     worker_registration_token: str = None
@@ -167,6 +170,11 @@ class Config:
             self.storage_path = env_storage_path
         elif self.storage_path is None:
             self.storage_path = self._get_default_storage_path()
+        
+        # Host storage path for Docker-in-Docker scenarios:
+        # When worker runs in a container, this is the HOST path for child container mounts
+        # Defaults to storage_path if not set (standalone/non-Docker setups)
+        self.host_storage_path = os.getenv("HOST_STORAGE_PATH", self.storage_path)
         
         # Worker registration
         self.worker_registration_token = os.getenv("WORKER_REGISTRATION_TOKEN", self.worker_registration_token)

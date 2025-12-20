@@ -44,4 +44,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import redis; r=redis.Redis(host='redis'); r.ping()" || exit 1
 
 # Start Celery worker with embedded beat scheduler for periodic tasks
-CMD ["celery", "-A", "backend.tasks", "worker", "-B", "--loglevel=info", "--concurrency=2"]
+# -Q grinn_jobs,celery: Listen to both the grinn_jobs queue (for job processing) and default celery queue
+CMD ["celery", "-A", "backend.tasks", "worker", "-B", "-Q", "grinn_jobs,celery", "--loglevel=info", "--concurrency=2"]

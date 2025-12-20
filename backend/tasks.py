@@ -148,6 +148,23 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
         # Use local storage directories directly (accessible via NFS for multi-worker setups)
         input_dir = local_storage_manager.get_input_directory(job_id)
         output_dir = local_storage_manager.get_output_directory(job_id)
+        
+        # For Docker-in-Docker: translate container paths to host paths for child container mounts
+        # This is needed when the worker runs inside a container and spawns gRINN containers
+        container_storage_path = local_config.storage_path  # e.g., /data/grinn-jobs
+        host_storage_path = local_config.host_storage_path  # e.g., /home/onur/igrinn/grinn-jobs
+        
+        def translate_to_host_path(container_path: str) -> str:
+            """Translate a container-internal path to the equivalent host path for child container mounts."""
+            if host_storage_path and container_storage_path and host_storage_path != container_storage_path:
+                if container_path.startswith(container_storage_path):
+                    return container_path.replace(container_storage_path, host_storage_path, 1)
+            return container_path
+        
+        # Host paths for mounting in child containers (gRINN)
+        host_input_dir = translate_to_host_path(input_dir)
+        host_output_dir = translate_to_host_path(output_dir)
+        logger.info(f"Path mapping: container={input_dir} -> host={host_input_dir}")
 
         try:
             # Verify input files exist
@@ -390,8 +407,8 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                     grinn_image,
                     command=preflight_command,
                     volumes={
-                        input_dir: {'bind': '/input', 'mode': 'ro'},
-                        output_dir: {'bind': '/output', 'mode': 'rw'}
+                        host_input_dir: {'bind': '/input', 'mode': 'ro'},
+                        host_output_dir: {'bind': '/output', 'mode': 'rw'}
                     },
                     tmpfs={'/tmp': ''},  # Writable /tmp for non-root user
                     name=preflight_container_name,
@@ -447,8 +464,8 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                 grinn_image,
                 command=docker_command,
                 volumes={
-                    input_dir: {'bind': '/input', 'mode': 'ro'},
-                    output_dir: {'bind': '/output', 'mode': 'rw'}
+                    host_input_dir: {'bind': '/input', 'mode': 'ro'},
+                    host_output_dir: {'bind': '/output', 'mode': 'rw'}
                 },
                 tmpfs={'/tmp': ''},  # Writable /tmp for non-root user
                 name=container_name,
