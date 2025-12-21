@@ -428,10 +428,12 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
 
                 # Persist full preflight logs to output folder for later inspection/download.
                 try:
-                    os.makedirs(output_dir, exist_ok=True)
+                    os.makedirs(output_dir, mode=0o777, exist_ok=True)
+                    os.chmod(output_dir, 0o777)  # Ensure permissions even if dir existed
                     preflight_log_path = os.path.join(output_dir, 'preflight.log')
                     with open(preflight_log_path, 'w', encoding='utf-8', errors='replace') as f:
                         f.write(preflight_logs)
+                    os.chmod(preflight_log_path, 0o666)  # Make log file world-readable/writable
                 except Exception as e:
                     logger.warning(f"Could not write preflight.log for job {job_id}: {e}")
 

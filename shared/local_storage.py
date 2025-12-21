@@ -6,6 +6,7 @@ Handles file storage operations using local filesystem (with optional NFS for mu
 import os
 import shutil
 import logging
+import stat
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any
@@ -13,6 +14,49 @@ import hashlib
 import json
 
 logger = logging.getLogger(__name__)
+
+# World-writable permissions for directories (rwxrwxrwx)
+DIR_PERMISSIONS = stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO  # 0o777
+
+# World-readable/writable permissions for files (rw-rw-rw-)
+FILE_PERMISSIONS = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH  # 0o666
+
+
+def ensure_dir_permissions(path: Path) -> None:
+    """
+    Ensure a directory has world-writable permissions.
+    This is needed when running as root in containers to allow
+    other containers/users to write to the directories.
+    """
+    try:
+        os.chmod(path, DIR_PERMISSIONS)
+    except OSError as e:
+        logger.warning(f"Could not set permissions on {path}: {e}")
+
+
+def makedirs_with_permissions(path: Path, exist_ok: bool = True) -> None:
+    """
+    Create directories with world-writable permissions.
+    Creates all parent directories as needed.
+    """
+    path = Path(path)
+    
+    # Create directory with explicit mode
+    path.mkdir(parents=True, exist_ok=exist_ok, mode=DIR_PERMISSIONS)
+    
+    # Ensure permissions are set (mkdir mode may be affected by umask)
+    ensure_dir_permissions(path)
+    
+    # Also ensure parent directories have proper permissions
+    # (in case they were created with wrong permissions previously)
+    for parent in path.parents:
+        if parent.exists() and str(parent) != '/':
+            try:
+                current_mode = parent.stat().st_mode & 0o777
+                if current_mode != DIR_PERMISSIONS:
+                    ensure_dir_permissions(parent)
+            except OSError:
+                break  # Stop if we can't access a parent
 
 
 class LocalStorageManager:
@@ -48,8 +92,8 @@ class LocalStorageManager:
         logger.info(f"LocalStorageManager initialized with storage path: {self.storage_path}")
     
     def _ensure_directories(self):
-        """Ensure base directory structure exists."""
-        self.jobs_path.mkdir(parents=True, exist_ok=True)
+        """Ensure base directory structure exists with proper permissions."""
+        makedirs_with_permissions(self.jobs_path)
     
     def _get_job_path(self, job_id: str) -> Path:
         """Get the base path for a job."""
@@ -80,8 +124,13 @@ class LocalStorageManager:
         input_path = self._get_input_path(job_id)
         output_path = self._get_output_path(job_id)
         
-        input_path.mkdir(parents=True, exist_ok=True)
-        output_path.mkdir(parents=True, exist_ok=True)
+        # Create directories with world-writable permissions
+        # This ensures workers running as different users can write to these directories
+        makedirs_with_permissions(input_path)
+        makedirs_with_permissions(output_path)
+        
+        # Also ensure the job base directory has proper permissions
+        ensure_dir_permissions(self._get_job_path(job_id))
         
         # Initialize metadata
         metadata = {
@@ -137,11 +186,17 @@ class LocalStorageManager:
         else:
             target_dir = self._get_output_path(job_id)
         
-        target_dir.mkdir(parents=True, exist_ok=True)
+        makedirs_with_permissions(target_dir)
         file_path = target_dir / filename
         
         with open(file_path, 'wb') as f:
             f.write(content)
+        
+        # Ensure the file is readable/writable by all
+        try:
+            os.chmod(file_path, FILE_PERMISSIONS)
+        except OSError:
+            pass  # Best effort
         
         # Update metadata
         metadata = self._load_metadata(job_id) or {
@@ -190,7 +245,7 @@ class LocalStorageManager:
             Full path where the file should be saved
         """
         input_path = self._get_input_path(job_id)
-        input_path.mkdir(parents=True, exist_ok=True)
+        makedirs_with_permissions(input_path)
         return str(input_path / filename)
     
     def download_job_inputs(self, job_id: str, target_dir: str) -> Dict[str, str]:

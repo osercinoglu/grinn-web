@@ -117,14 +117,27 @@ else:
 import uuid
 import shutil
 import secrets
+import stat
+
+# World-writable permissions for directories
+DIR_PERMISSIONS = stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO  # 0o777
+
 TEMP_UPLOAD_DIR = os.path.join(config.storage_path, 'temp_uploads')
-os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
+os.makedirs(TEMP_UPLOAD_DIR, mode=0o777, exist_ok=True)
+try:
+    os.chmod(TEMP_UPLOAD_DIR, 0o777)
+except OSError:
+    pass
 
 def save_temp_file(content_string: str, filename: str, session_id: str) -> str:
     """Save uploaded file to temporary storage and return the temp file ID."""
-    # Create session directory
+    # Create session directory with world-writable permissions
     session_dir = os.path.join(TEMP_UPLOAD_DIR, session_id)
-    os.makedirs(session_dir, exist_ok=True)
+    os.makedirs(session_dir, mode=0o777, exist_ok=True)
+    try:
+        os.chmod(session_dir, 0o777)
+    except OSError:
+        pass
     
     # Generate unique file ID
     file_id = f"{uuid.uuid4().hex[:8]}_{filename}"
@@ -1795,7 +1808,7 @@ def create_file_upload_section():
                                     html.Td(f"max {config.max_trajectory_file_size_mb} MB", style={'textAlign': 'left', 'paddingBottom': '6px'})
                                 ]),
                                 html.Tr([
-                                    html.Td("Structure/topology files (.pdb/.top/.itp):", style={'textAlign': 'left', 'paddingRight': '15px', 'paddingBottom': '6px', 'fontWeight': '500', 'whiteSpace': 'nowrap'}),
+                                    html.Td("Structure/topology files (.pdb/.gro/.top/.itp):", style={'textAlign': 'left', 'paddingRight': '15px', 'paddingBottom': '6px', 'fontWeight': '500', 'whiteSpace': 'nowrap'}),
                                     html.Td(f"max {config.max_other_file_size_mb} MB", style={'textAlign': 'left', 'paddingBottom': '6px'})
                                 ]),
                                 html.Tr([
@@ -2549,6 +2562,12 @@ app.layout = html.Div([
 )
 def display_page(pathname):
     """Handle URL routing for different pages."""
+    logger.info(f"display_page called with pathname: {repr(pathname)}")
+    
+    # Normalize pathname - strip trailing slashes for consistent matching
+    if pathname and pathname != '/':
+        pathname = pathname.rstrip('/')
+    
     if pathname is None or pathname == '/':
         # Generate a unique session ID for this page load
         session_id = secrets.token_hex(16)
@@ -2613,6 +2632,7 @@ def display_page(pathname):
     elif pathname.startswith('/monitor/'):
         # Job monitoring page
         job_id = pathname.split('/')[-1]
+        logger.info(f"Routing to monitor page for job: {job_id}")
         return create_job_monitoring_page(job_id)
     elif pathname == '/queue':
         # Job queue page
@@ -2620,10 +2640,12 @@ def display_page(pathname):
     elif pathname.startswith('/results/'):
         # Results viewing page
         job_id = pathname.split('/')[-1]
+        logger.info(f"Routing to results page for job: {job_id}")
         return create_results_page(job_id)
     elif pathname.startswith('/dashboard/'):
         # Dashboard viewing page with readiness check
         job_id = pathname.split('/')[-1]
+        logger.info(f"Routing to dashboard page for job: {job_id}")
         return create_dashboard_page(job_id)
     elif pathname == '/help':
         # Help/documentation page
@@ -2693,7 +2715,7 @@ def update_mode_instructions(mode):
                 html.Div([
                     html.Strong("Required: "),
                     html.Ul([
-                        html.Li("Structure (.pdb)", style={'margin': '2px 0'}),
+                        html.Li("Structure (.pdb/.gro)", style={'margin': '2px 0'}),
                         html.Li(f"Trajectory (.xtc/.trr, max {config.max_trajectory_file_size_mb}MB)", style={'margin': '2px 0'}),
                         html.Li("Topology (.top)", style={'margin': '2px 0'})
                     ], style={'fontSize': '0.85rem', 'marginTop': '5px', 'marginBottom': '5px', 'paddingLeft': '20px'})
@@ -2820,7 +2842,7 @@ def update_file_size_limits_info(mode):
                     html.Td(f"max {config.max_trajectory_file_size_mb} MB", style=value_cell_style)
                 ]),
                 html.Tr([
-                    html.Td("Structure/topology files (.pdb/.top/.itp):", style=label_cell_style),
+                    html.Td("Structure/topology files (.pdb/.gro/.top/.itp):", style=label_cell_style),
                     html.Td(f"max {config.max_other_file_size_mb} MB", style=value_cell_style)
                 ]),
                 html.Tr([

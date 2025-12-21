@@ -132,7 +132,8 @@ def validate_environment(args):
             return False
     else:
         try:
-            os.makedirs(storage_path, exist_ok=True)
+            os.makedirs(storage_path, mode=0o777, exist_ok=True)
+            os.chmod(storage_path, 0o777)  # Ensure permissions
             logger.info(f"✅ Storage path created: {storage_path}")
         except Exception as e:
             logger.error(f"❌ Cannot create storage path: {e}")

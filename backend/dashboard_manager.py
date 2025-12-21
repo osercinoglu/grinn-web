@@ -64,6 +64,9 @@ class DashboardManager:
         if self.redis_client:
             self._sync_from_redis()
         
+        # Discover any orphaned dashboard containers from previous sessions
+        self._sync_orphaned_containers()
+        
         logger.info(f"DashboardManager initialized: ports {self.start_port}-{self.end_port}, "
                    f"image={self.docker_image}, max_instances={self.max_instances}, "
                    f"idle_timeout={self.idle_timeout_minutes}min, public_host={self.public_host}, "
@@ -148,6 +151,76 @@ class DashboardManager:
         except Exception as e:
             logger.warning(f"Failed to sync dashboards from Redis: {e}")
     
+    def _sync_orphaned_containers(self):
+        """Discover and sync dashboard containers not in cache.
+        
+        This handles containers that were started by a previous webapp session
+        but are still running. Without this, port allocation would fail when
+        trying to bind to ports already in use by orphaned containers.
+        """
+        try:
+            # List all running containers with grinn-dashboard image
+            result = subprocess.run(
+                ['docker', 'ps', '--filter', f'ancestor={self.docker_image}',
+                 '--format', '{{.ID}}|{{.Names}}|{{.Ports}}'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                logger.warning(f"Failed to list dashboard containers: {result.stderr}")
+                return
+            
+            import re
+            discovered = 0
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                
+                parts = line.split('|')
+                if len(parts) < 3:
+                    continue
+                
+                container_id, container_name, ports = parts[0], parts[1], parts[2]
+                
+                # Extract job_id from container name (e.g., "grinn-dashboard-17-some-job-id")
+                if not container_name.startswith('grinn-dashboard-'):
+                    continue
+                job_id = container_name[len('grinn-dashboard-'):]
+                
+                # Skip if already in cache
+                if job_id in self._active_dashboards_cache:
+                    continue
+                
+                # Extract host port from port mapping (e.g., "0.0.0.0:8100->8060/tcp")
+                port_match = re.search(r'(?:0\.0\.0\.0|:::?):(\d+)->', ports)
+                if not port_match:
+                    continue
+                port = int(port_match.group(1))
+                
+                # Add to cache
+                dashboard_data = {
+                    'container_id': container_id,
+                    'container_name': container_name,
+                    'port': port,
+                    'started_at': datetime.utcnow(),  # Approximate, actual start time unknown
+                    'ready': True,  # Assume ready if container is running
+                    'last_heartbeat': datetime.utcnow()
+                }
+                self._active_dashboards_cache[job_id] = dashboard_data
+                self._save_dashboard_to_redis(job_id, dashboard_data)
+                discovered += 1
+                logger.info(f"Discovered orphaned dashboard container: {job_id} on port {port}")
+            
+            if discovered > 0:
+                logger.info(f"Synced {discovered} orphaned dashboard containers")
+                
+        except subprocess.TimeoutExpired:
+            logger.warning("Timeout discovering orphaned dashboard containers")
+        except Exception as e:
+            logger.warning(f"Error discovering orphaned dashboard containers: {e}")
+    
     def _save_dashboard_to_redis(self, job_id: str, data: Dict):
         """Save dashboard data to Redis."""
         if not self.redis_client:
@@ -178,18 +251,70 @@ class DashboardManager:
         
     def get_next_available_port(self) -> Optional[int]:
         """Find next available port for dashboard instance."""
-        used_ports = {info['port'] for info in self._active_dashboards_cache.values()}
+        # Get ports used by cache
+        cached_ports = {info['port'] for info in self._active_dashboards_cache.values()}
+        
+        # Also get ports actually bound by Docker containers (handles orphaned containers)
+        docker_bound_ports = self._get_docker_bound_ports()
+        used_ports = cached_ports | docker_bound_ports
+        
+        logger.debug(f"Port allocation: cached={cached_ports}, docker_bound={docker_bound_ports}")
         
         for port in range(self.start_port, self.end_port):
             if port not in used_ports:
-                # Double-check port is actually available
-                if self._is_port_available(port):
-                    return port
+                return port
         
         return None
     
+    def _get_docker_bound_ports(self) -> set:
+        """Get set of host ports currently bound by Docker containers.
+        
+        This queries Docker directly to find ports bound to the host,
+        which is necessary when running inside a container (Docker-in-Docker)
+        where socket binding checks won't detect host port usage.
+        """
+        try:
+            # Use docker ps to get all containers with port mappings
+            result = subprocess.run(
+                ['docker', 'ps', '--format', '{{.Ports}}'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                logger.warning(f"Failed to query Docker ports: {result.stderr}")
+                return set()
+            
+            bound_ports = set()
+            # Parse port mappings like "0.0.0.0:8100->8060/tcp, :::8100->8060/tcp"
+            import re
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                # Match patterns like "0.0.0.0:8100->8060/tcp" or ":::8100->8060/tcp"
+                matches = re.findall(r'(?:0\.0\.0\.0|:::?):(\d+)->', line)
+                for port_str in matches:
+                    port = int(port_str)
+                    if self.start_port <= port < self.end_port:
+                        bound_ports.add(port)
+            
+            return bound_ports
+            
+        except subprocess.TimeoutExpired:
+            logger.warning("Timeout querying Docker for bound ports")
+            return set()
+        except Exception as e:
+            logger.warning(f"Error querying Docker for bound ports: {e}")
+            return set()
+    
     def _is_port_available(self, port: int) -> bool:
-        """Check if a port is available using socket binding."""
+        """Check if a port is available using socket binding.
+        
+        Note: This check may not work correctly when running inside a Docker
+        container, as it checks the container's network namespace, not the host.
+        Use _get_docker_bound_ports() for reliable host port detection.
+        """
         import socket
         try:
             # Try to bind to the port

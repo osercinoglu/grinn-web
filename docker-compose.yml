@@ -64,6 +64,10 @@ services:
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
       - EXAMPLE_DATA_PATH_TRAJECTORY=/app/example_data/trajectory
       - EXAMPLE_DATA_PATH_ENSEMBLE=/app/example_data/ensemble
+      # Dashboard URL settings (override baked-in values from image)
+      - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
+      - DASHBOARD_PUBLIC_HOST=${DASHBOARD_PUBLIC_HOST:-localhost}
+      - DASHBOARD_PUBLIC_URL_TEMPLATE=${DASHBOARD_PUBLIC_URL_TEMPLATE:-}
     volumes:
       - ${STORAGE_PATH:-./storage}:/data/grinn-jobs
       - webapp_logs:/app/logs

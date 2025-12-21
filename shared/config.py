@@ -4,10 +4,29 @@ Handles environment variables, secrets, and service configuration.
 """
 
 import os
+import stat
 import socket
 from dataclasses import dataclass
 from typing import Optional
 import logging
+
+# World-writable permissions for directories (rwxrwxrwx)
+DIR_PERMISSIONS = stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO  # 0o777
+
+
+def makedirs_with_permissions(path: str, exist_ok: bool = True) -> None:
+    """
+    Create directories with world-writable permissions.
+    This is needed when running as root in containers to allow
+    other containers/users to write to the directories.
+    """
+    os.makedirs(path, mode=DIR_PERMISSIONS, exist_ok=exist_ok)
+    # Ensure permissions are set (mkdir mode may be affected by umask)
+    try:
+        os.chmod(path, DIR_PERMISSIONS)
+    except OSError:
+        pass  # Best effort
+
 
 # Load environment variables from a deterministic .env location.
 # Rationale: Celery/other processes may be started with an arbitrary CWD, so
@@ -276,11 +295,11 @@ class Config:
         # Default GROMACS version for dropdown selection
         self.default_gromacs_version = os.getenv("DEFAULT_GROMACS_VERSION", self.default_gromacs_version)
         
-        # Create upload folder if it doesn't exist
-        os.makedirs(self.upload_folder, exist_ok=True)
+        # Create upload folder if it doesn't exist (with world-writable permissions)
+        makedirs_with_permissions(self.upload_folder)
         
-        # Create storage directory if it doesn't exist
-        os.makedirs(self.storage_path, exist_ok=True)
+        # Create storage directory if it doesn't exist (with world-writable permissions)
+        makedirs_with_permissions(self.storage_path)
     
     def validate(self):
         """Validate configuration and raise errors for missing required settings."""
@@ -289,7 +308,7 @@ class Config:
         # Validate storage path exists and is writable
         if not os.path.exists(self.storage_path):
             try:
-                os.makedirs(self.storage_path, exist_ok=True)
+                makedirs_with_permissions(self.storage_path)
             except Exception as e:
                 errors.append(f"STORAGE_PATH '{self.storage_path}' cannot be created: {e}")
         elif not os.access(self.storage_path, os.W_OK):
@@ -352,7 +371,8 @@ class Config:
         """Get public URL for a dashboard instance.
         
         If DASHBOARD_PUBLIC_URL_TEMPLATE is set, uses that with {job_id} substitution.
-        Otherwise, constructs URL from dashboard_public_host and port.
+        Otherwise, constructs URL from dashboard_public_host and port with the
+        expected path that matches the dashboard container's DASH_URL_BASE_PATHNAME.
         
         Args:
             job_id: The job ID for the dashboard
@@ -368,8 +388,9 @@ class Config:
                 url += '/'
             return url
         # Fallback to direct port access (for local development without proxy)
+        # Must include the full path that matches DASH_URL_BASE_PATHNAME in the container
         if port:
-            return f"http://{self.dashboard_public_host}:{port}/"
+            return f"http://{self.dashboard_public_host}:{port}/api/dashboard/{job_id}/"
         raise ValueError("Port required when DASHBOARD_PUBLIC_URL_TEMPLATE is not set")
 
 
