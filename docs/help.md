@@ -55,7 +55,7 @@ For analyzing molecular dynamics simulation trajectories generated with GROMACS:
 
 | File Type    |  Extensions      | Description            |
 |--------------|------------------|------------------------|
-| Structure    | `.pdb`           | Protein structure file |
+| Structure    | `.pdb` or `.gro` | Protein structure file |
 | Trajectory   | `.xtc` or `.trr` | MD trajectory file     |
 | Topology     | `.top`           | GROMACS topology file  |
 

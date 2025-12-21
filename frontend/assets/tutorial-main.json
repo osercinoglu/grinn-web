@@ -14,7 +14,7 @@
       "element": "#input-mode-selector",
       "popover": {
         "title": "Step 1: Select Input Mode",
-        "description": "<strong>Trajectory Mode:</strong> For MD simulations - requires structure (.pdb/.gro), trajectory (.xtc/.trr), and topology (.top) files.<br><br><strong>PDB Ensemble Mode:</strong> For multi-model PDB files - topology is auto-generated.<br><br>For this tutorial, we'll use the Trajectory Mode (default).",
+        "description": "<strong>Trajectory Mode:</strong> For MD simulations - requires structure (.pdb/.gro), trajectory (.xtc/.trr), and topology (.top) files.<br><br><strong>PDB Ensemble Mode:</strong> For multi-model PDB files - topology is auto-generated.<br><br>For this tutorial, we'll use the Trajectory Mode (default)."
         "side": "bottom",
         "align": "start"
       }
@@ -36,7 +36,7 @@
       "element": "#file-list-display",
       "popover": {
         "title": "Files Loaded! ✓",
-        "description": "The example files have been loaded and validated. You can see:<br>• <strong>Structure file</strong> (.pdb/.gro) - protein coordinates<br>• <strong>Trajectory file</strong> (.xtc/.trr) - MD frames<br>• <strong>Topology file</strong> (.top) - force field parameters<br>• <strong>Include files</strong> (e.g. .itp) that are required by the topology file.<br><br><strong>Note:</strong> Example data jobs are automatically set to <strong>public</strong> so they appear in the Job Queue for demonstration.",
+        "description": "The example files have been loaded and validated. You can see:<br>• <strong>Structure file</strong> (.pdb/.gro) - protein coordinates<br>• <strong>Trajectory file</strong> (.xtc/.trr) - MD frames<br>• <strong>Topology file</strong> (.top) - force field parameters<br>• <strong>Include files</strong> (e.g. .itp) that are required by the topology file.<br><br><strong>Note:</strong> Example data jobs are automatically set to <strong>public</strong> so they appear in the Job Queue for demonstration."
         "side": "left",
         "align": "start"
       }
