@@ -371,17 +371,19 @@ def detect_role_conflicts(files: list, mode: str = 'trajectory') -> dict:
     """
     Detect files with conflicting exclusive roles.
     
-    In trajectory mode, only one file should have 'topology' role.
+    In trajectory mode:
+    - Only one file should have 'topology' role
+    - Only one PDB/GRO file should be uploaded (reference structure)
     
     Args:
         files: List of file data dicts
         mode: Input mode ('trajectory' or 'ensemble')
     
     Returns:
-        Dict with 'topology' key containing list of file keys that have
-        that role (conflict if len > 1)
+        Dict with 'topology' and 'structure' keys, each containing
+        list of file keys that have conflicts (conflict if len > 1)
     """
-    conflicts = {'topology': []}
+    conflicts = {'topology': [], 'structure': []}
     
     if mode == 'ensemble':
         # No conflicts to detect in ensemble mode
@@ -391,49 +393,61 @@ def detect_role_conflicts(files: list, mode: str = 'trajectory') -> dict:
     files_for_mode = [f for f in files if f.get('uploaded_for_mode', 'trajectory') == mode]
     
     for f in files_for_mode:
-        role = f.get('role', get_default_role(f.get('file_type', ''), mode))
+        file_type = f.get('file_type', '')
+        role = f.get('role', get_default_role(file_type, mode))
         file_key = f.get('temp_file_id') or f.get('example_path') or f.get('filename')
         
         if role == 'topology':
             conflicts['topology'].append(file_key)
+        
+        # Track structure files by type (pdb/gro)
+        if file_type in ['pdb', 'gro']:
+            conflicts['structure'].append(file_key)
     
     return conflicts
 
 
-def create_purpose_cell(file_data: dict, file_key: str, input_mode: str, conflicts: dict = None) -> html.Div:
+def create_purpose_cell(file_data: dict, file_key: str, input_mode: str, conflicts: dict = None, is_selected_structure: bool = False) -> html.Div:
     """
-    Create the purpose cell for a file row - either a dropdown or static text.
+    Create the purpose cell for a file row - either a dropdown, radio button, or static text.
     
     Args:
         file_data: File metadata dict
         file_key: Unique key for the file (for pattern matching)
         input_mode: Current input mode ('trajectory' or 'ensemble')
         conflicts: Dict of role conflicts from detect_role_conflicts()
+        is_selected_structure: Whether this file is the selected reference structure
     
     Returns:
-        html.Div containing either a dropdown or static text
+        html.Div containing either a dropdown, radio button, or static text
     """
     file_type = file_data.get('file_type', '')
     role_options = get_role_options(file_type, input_mode)
     current_role = file_data.get('role', get_default_role(file_type, input_mode))
     
-    # Check if this file has a conflict
-    has_conflict = False
+    # Check for topology conflict
+    has_topology_conflict = False
     if conflicts:
         if file_key in conflicts.get('topology', []) and len(conflicts.get('topology', [])) > 1:
-            has_conflict = True
+            has_topology_conflict = True
+    
+    # Check for structure conflict (multiple PDB/GRO files)
+    has_structure_conflict = False
+    if conflicts and file_type in ['pdb', 'gro']:
+        if len(conflicts.get('structure', [])) > 1:
+            has_structure_conflict = True
     
     # Determine border style based on conflict state
     dropdown_style = {
         'fontSize': '0.8rem',
         'minWidth': '150px',
     }
-    if has_conflict:
+    if has_topology_conflict:
         dropdown_style['border'] = '2px solid #dc3545'
         dropdown_style['borderRadius'] = '4px'
     
     if role_options:
-        # Multiple options - render dropdown
+        # Multiple options - render dropdown (for topology files)
         purpose_content = html.Div([
             dcc.Dropdown(
                 id={'type': 'file-role', 'index': file_key},
@@ -449,10 +463,31 @@ def create_purpose_cell(file_data: dict, file_key: str, input_mode: str, conflic
                 style={
                     'color': '#dc3545',
                     'marginLeft': '8px',
-                    'display': 'inline-block' if has_conflict else 'none'
+                    'display': 'inline-block' if has_topology_conflict else 'none'
                 },
-                title=f"Conflict: Another file also has this role" if has_conflict else ""
-            ) if has_conflict else None
+                title=f"Conflict: Another file also has this role" if has_topology_conflict else ""
+            ) if has_topology_conflict else None
+        ], style={'display': 'flex', 'alignItems': 'center', 'flex': '2.5'})
+    elif has_structure_conflict:
+        # Multiple structure files - show radio button for selection
+        purpose_content = html.Div([
+            dcc.RadioItems(
+                id={'type': 'structure-select', 'index': file_key},
+                options=[{'label': ' Use as Reference', 'value': file_key}],
+                value=file_key if is_selected_structure else None,
+                inline=True,
+                style={'fontSize': '0.8rem'},
+                inputStyle={'marginRight': '5px'},
+                labelStyle={'display': 'flex', 'alignItems': 'center', 'cursor': 'pointer'}
+            ),
+            html.I(
+                className="fas fa-exclamation-triangle",
+                style={
+                    'color': '#dc3545',
+                    'marginLeft': '8px',
+                },
+                title="Multiple structure files uploaded. Select one to use."
+            )
         ], style={'display': 'flex', 'alignItems': 'center', 'flex': '2.5'})
     else:
         # Fixed role - render static text
@@ -3288,7 +3323,22 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
     
     # Detect role conflicts for visual feedback
     conflicts = detect_role_conflicts(files, input_mode)
-    has_any_conflict = len(conflicts.get('topology', [])) > 1
+    has_topology_conflict = len(conflicts.get('topology', [])) > 1
+    has_structure_conflict = len(conflicts.get('structure', [])) > 1
+    
+    # Determine which structure file is selected (first one by default, or the one marked)
+    selected_structure_key = None
+    if conflicts.get('structure'):
+        # Check if any file is explicitly marked as selected
+        for f in files_for_current_mode:
+            if f.get('file_type') in ['pdb', 'gro']:
+                f_key = f.get('temp_file_id') or f.get('example_path') or f.get('filename')
+                if f.get('is_selected_structure', False):
+                    selected_structure_key = f_key
+                    break
+        # If none explicitly selected, default to first structure file
+        if not selected_structure_key and conflicts.get('structure'):
+            selected_structure_key = conflicts['structure'][0]
     
     # Create table rows for current mode's files only
     file_list_items = [table_header]
@@ -3298,8 +3348,11 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
         # Use temp_file_id or example_path as unique key for reliable removal
         file_key = file_data.get('temp_file_id') or file_data.get('example_path') or f"{file_data['filename']}_{idx}"
         
-        # Create purpose cell (dropdown or static text)
-        purpose_cell = create_purpose_cell(file_data, file_key, input_mode, conflicts)
+        # Check if this is the selected structure file
+        is_selected_structure = (file_key == selected_structure_key)
+        
+        # Create purpose cell (dropdown, radio button, or static text)
+        purpose_cell = create_purpose_cell(file_data, file_key, input_mode, conflicts, is_selected_structure)
         
         file_list_items.append(
             html.Div([
@@ -3346,8 +3399,18 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
             }, className='file-table-row')
         )
     
-    # Add conflict warning message if there are conflicts
-    if has_any_conflict:
+    # Add conflict warning messages
+    if has_structure_conflict:
+        validation_messages.append(
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px', 'color': '#dc3545'}),
+                html.Strong("Multiple structure files: "),
+                f"You have uploaded {len(conflicts['structure'])} PDB/GRO files. Only one can be used as the reference structure. ",
+                "Select one file to use and remove the others, or they will be discarded upon submission."
+            ], className="alert alert-warning", style={'marginTop': '10px'})
+        )
+    
+    if has_topology_conflict:
         validation_messages.append(
             html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px', 'color': '#dc3545'}),
@@ -3921,7 +3984,22 @@ def update_file_display_on_removal(stored_files, input_mode):
     
     # Detect role conflicts for visual feedback
     conflicts = detect_role_conflicts(files, input_mode)
-    has_any_conflict = len(conflicts.get('topology', [])) > 1
+    has_topology_conflict = len(conflicts.get('topology', [])) > 1
+    has_structure_conflict = len(conflicts.get('structure', [])) > 1
+    
+    # Determine which structure file is selected (first one by default, or the one marked)
+    selected_structure_key = None
+    if conflicts.get('structure'):
+        # Check if any file is explicitly marked as selected
+        for f in files_for_current_mode:
+            if f.get('file_type') in ['pdb', 'gro']:
+                f_key = f.get('temp_file_id') or f.get('example_path') or f.get('filename')
+                if f.get('is_selected_structure', False):
+                    selected_structure_key = f_key
+                    break
+        # If none explicitly selected, default to first structure file
+        if not selected_structure_key and conflicts.get('structure'):
+            selected_structure_key = conflicts['structure'][0]
     
     # Create table rows - only for current mode files
     file_list_items = [table_header]
@@ -3931,8 +4009,11 @@ def update_file_display_on_removal(stored_files, input_mode):
         # Use temp_file_id or example_path as unique key for reliable removal
         file_key = file_data.get('temp_file_id') or file_data.get('example_path') or f"{file_data['filename']}_{idx}"
         
-        # Create purpose cell (dropdown or static text)
-        purpose_cell = create_purpose_cell(file_data, file_key, input_mode, conflicts)
+        # Check if this is the selected structure file
+        is_selected_structure = (file_key == selected_structure_key)
+        
+        # Create purpose cell (dropdown, radio button, or static text)
+        purpose_cell = create_purpose_cell(file_data, file_key, input_mode, conflicts, is_selected_structure)
         
         file_list_items.append(
             html.Div([
@@ -3982,8 +4063,18 @@ def update_file_display_on_removal(stored_files, input_mode):
     # Validation based on input mode - only check files for current mode
     validation_messages = []
     
-    # Add conflict warning message if there are conflicts
-    if has_any_conflict:
+    # Add conflict warning messages
+    if has_structure_conflict:
+        validation_messages.append(
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px', 'color': '#dc3545'}),
+                html.Strong("Multiple structure files: "),
+                f"You have uploaded {len(conflicts['structure'])} PDB/GRO files. Only one can be used as the reference structure. ",
+                "Select one file to use and remove the others, or they will be discarded upon submission."
+            ], className="alert alert-warning", style={'marginTop': '10px'})
+        )
+    
+    if has_topology_conflict:
         validation_messages.append(
             html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px', 'color': '#dc3545'}),
@@ -4172,6 +4263,90 @@ def update_file_role(role_values, stored_files, role_ids):
     return stored_files
 
 
+# Update structure selection when user clicks a radio button
+@app.callback(
+    Output('uploaded-files-store', 'data', allow_duplicate=True),
+    [Input({'type': 'structure-select', 'index': ALL}, 'value')],
+    [State('uploaded-files-store', 'data'),
+     State({'type': 'structure-select', 'index': ALL}, 'id'),
+     State('input-mode-selector', 'value')],
+    prevent_initial_call=True
+)
+def update_structure_selection(selected_values, stored_files, select_ids, input_mode):
+    """Update structure selection when user clicks radio button to select reference structure."""
+    logger.info(f"update_structure_selection triggered: selected_values={selected_values}, select_ids={select_ids}")
+    
+    ctx = callback_context
+    
+    # Check if callback was actually triggered
+    if not ctx.triggered:
+        logger.info("No trigger, skipping")
+        return no_update
+    
+    if not stored_files or not select_ids:
+        logger.info("No stored files or select_ids, skipping")
+        return no_update
+    
+    # Get the triggered radio button's ID
+    triggered_id = ctx.triggered_id
+    logger.info(f"triggered_id: {triggered_id}")
+    
+    if not triggered_id or not isinstance(triggered_id, dict):
+        logger.info("No valid triggered_id dict, skipping")
+        return no_update
+    
+    if triggered_id.get('type') != 'structure-select':
+        logger.info("Not a structure-select radio button, skipping")
+        return no_update
+    
+    # Get the file key that was selected
+    selected_file_key = triggered_id.get('index')
+    logger.info(f"Structure selection for file_key: {selected_file_key}")
+    
+    # Find the corresponding selected value (should match the file_key if radio was checked)
+    is_selected = False
+    for select_id, select_val in zip(select_ids, selected_values):
+        if select_id.get('index') == selected_file_key and select_val == selected_file_key:
+            is_selected = True
+            break
+    
+    if not is_selected:
+        logger.info("Radio button was deselected, skipping")
+        return no_update
+    
+    # Update is_selected_structure in stored_files:
+    # - Set True for the selected file
+    # - Set False for all other structure files in the same mode
+    current_mode = input_mode or 'trajectory'
+    updated = False
+    
+    for file_data in stored_files:
+        # Only update files for current mode
+        if file_data.get('uploaded_for_mode', 'trajectory') != current_mode:
+            continue
+        
+        # Only update structure files (pdb/gro)
+        if file_data.get('file_type') not in ['pdb', 'gro']:
+            continue
+        
+        file_key = file_data.get('temp_file_id') or file_data.get('example_path') or file_data.get('filename')
+        
+        if file_key == selected_file_key:
+            logger.info(f"Marking {file_data['filename']} as selected structure")
+            file_data['is_selected_structure'] = True
+            updated = True
+        else:
+            # Deselect other structure files
+            file_data['is_selected_structure'] = False
+    
+    if not updated:
+        logger.info(f"Could not find file with key {selected_file_key} to select")
+        return no_update
+    
+    logger.info(f"Structure selection updated successfully")
+    return stored_files
+
+
 @app.callback(
     Output('uploaded-files-store', 'data', allow_duplicate=True),
     [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks_timestamp')],
@@ -4306,6 +4481,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
     # Check for role conflicts (e.g., multiple topology files)
     conflicts = detect_role_conflicts(uploaded_files, current_mode)
     has_topology_conflict = len(conflicts.get('topology', [])) > 1
+    has_structure_conflict = len(conflicts.get('structure', [])) > 1
     
     if has_topology_conflict:
         logger.warning(f"Topology role conflict detected: {len(conflicts['topology'])} files")
@@ -4315,6 +4491,31 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             f"Multiple files assigned as Topology ({len(conflicts['topology'])} files). ",
             "Please use the 'Purpose in gRINN' dropdown to set one as 'Include file'."
         ], className="alert alert-danger"), no_update
+    
+    # Handle multiple structure files - only use the selected one
+    if has_structure_conflict and current_mode == 'trajectory':
+        # Find which structure file is selected
+        selected_structure_key = None
+        for f in files_for_submission:
+            if f.get('file_type') in ['pdb', 'gro'] and f.get('is_selected_structure', False):
+                selected_structure_key = f.get('temp_file_id') or f.get('example_path') or f.get('filename')
+                break
+        
+        # If none explicitly selected, use the first one
+        if not selected_structure_key:
+            for f in files_for_submission:
+                if f.get('file_type') in ['pdb', 'gro']:
+                    selected_structure_key = f.get('temp_file_id') or f.get('example_path') or f.get('filename')
+                    break
+        
+        # Filter out non-selected structure files
+        logger.info(f"Structure conflict detected, using selected structure: {selected_structure_key}")
+        files_for_submission = [
+            f for f in files_for_submission
+            if f.get('file_type') not in ['pdb', 'gro'] or 
+               (f.get('temp_file_id') or f.get('example_path') or f.get('filename')) == selected_structure_key
+        ]
+        logger.info(f"Filtered to {len(files_for_submission)} files after structure selection")
     
     # Validate ensemble mode: exactly one PDB file required
     if current_mode == 'ensemble':
