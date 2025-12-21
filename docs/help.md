@@ -11,8 +11,8 @@ No cookies are stored.
 
 - **Pairwise Non-bonded Residue Interaction Energy Calculation**: Compute non-bonded interaction (van der Waals and Electrostatic) energies between all potential or selected residue pairs across input simulation trajectory frames or conformational ensembles in PDB format.
 - **Protein Energy Networks**: Construct and analyze interaction energy based residue interaction networks (RINs), i.e. Protein Energy Networks (PENs) with node centrality metrics and shortest paths to identify functionally important residues and allosteric communication pathways, respectively.
-- **Interactive Dashboard**: Visualize analysis results using a rich and interactive dashboard interface with integrated molecular ([Mol*](https://molstar.org/)) and network viewers ([3D-force-directed graph](https://github.com/vasturiano/3d-force-graph)).
-- **Chat with Data**: Chat with popular large language models (LLMs) including Gemini Pro and Claude Sonnet 4 to explore result dataframes via pandasai and LiteLLM. 
+- **Interactive Dashboard**: Visualize analysis results using a rich and interactive dashboard interface based on [Plotly Dash](https://dash.plotly.com/) with integrated molecular ([Mol*](https://molstar.org/)) and network viewers ([3D-force-directed graph](https://github.com/vasturiano/3d-force-graph)).
+- **Chat with Data**: Chat with popular large language models (LLMs) including Gemini Pro and Claude Sonnet 4 to explore result dataframes via [pandasai](https://github.com/sinaptik-ai/pandas-ai) and [LiteLLM](https://github.com/BerriAI/litellm). 
 - **Two Analysis Modes**: Support for both gromacs-generated biomolecular dynamics trajectories (XTC/TRR) and topologies as well as custom PDB conformational ensembles.
 - **Residue-agnostic Analysis**: Support for _any_ residue type provided that it is properly defined in input .itp/.top files (only available from gromacs trajectories).
 
@@ -465,13 +465,12 @@ Expired jobs have passed the retention period (72 hours). The result files have 
 
 #### Can I download my results?
 
-Yes, use the **Save Results** button to download a complete archive of all output files.
+Yes, use the **Save Results** button on Job Monitor page to download a complete archive of all output files.
 
 #### The dashboard won't load. What should I do?
 
 - Ensure your job status is "Completed"
 - Try refreshing the page
-- Check that pop-ups are not blocked
 - Contact support if issues persist
 
 ### 8.5 Common Issues
@@ -502,7 +501,7 @@ i-gRINN is developed by the [Computational Structural Biology Research Group (CO
 
 ### 10.2 Contact
 
-For technical support or inquiries, contact Dr. Onur Serçinoğlu at
+For technical support or inquiries, contact Onur Serçinoğlu at
 
 - Email: osercinoglu AT gtu DOT com / onursercin AT gmail DOT com
 
