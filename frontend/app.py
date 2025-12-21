@@ -277,6 +277,194 @@ def get_file_purpose(file_type: str, mode: str = 'trajectory') -> str:
         return purpose_map.get(file_type, 'Unknown file type')
 
 
+def get_role_options(file_type: str, mode: str = 'trajectory') -> list:
+    """
+    Return available role options for a file type.
+    
+    Args:
+        file_type: File extension (e.g., 'pdb', 'xtc')
+        mode: Input mode ('trajectory' or 'ensemble')
+    
+    Returns:
+        List of dicts with 'label' and 'value' for dropdown options.
+        Empty list means fixed role (no dropdown needed).
+    """
+    if mode == 'ensemble':
+        # In ensemble mode, PDB has fixed role
+        return []
+    
+    # Trajectory mode - define role options per file type
+    role_options_map = {
+        'top': [
+            {'label': 'Topology file (main)', 'value': 'topology'},
+            {'label': 'Include file', 'value': 'include'}
+        ],
+        # Fixed roles - no dropdown
+        'pdb': [],  # Always reference structure
+        'gro': [],  # Always reference structure
+        'itp': [],  # Always include
+        'rtp': [],  # Always include
+        'prm': [],  # Always include
+        'xtc': [],  # Always trajectory
+        'trr': [],  # Always trajectory
+        'tpr': [],  # Always topology (binary)
+        'zip': [],  # Always forcefield
+    }
+    return role_options_map.get(file_type, [])
+
+
+def get_default_role(file_type: str, mode: str = 'trajectory') -> str:
+    """
+    Return the default role for a file type.
+    
+    Args:
+        file_type: File extension (e.g., 'pdb', 'xtc')
+        mode: Input mode ('trajectory' or 'ensemble')
+    
+    Returns:
+        Default role string
+    """
+    if mode == 'ensemble':
+        if file_type == 'pdb':
+            return 'ensemble_pdb'
+        return 'other'
+    
+    # Trajectory mode defaults
+    default_roles = {
+        'pdb': 'structure',
+        'gro': 'structure',
+        'xtc': 'trajectory',
+        'trr': 'trajectory',
+        'tpr': 'topology',
+        'top': 'topology',
+        'itp': 'include',
+        'rtp': 'include',
+        'prm': 'include',
+        'zip': 'forcefield'
+    }
+    return default_roles.get(file_type, 'other')
+
+
+def get_role_display_name(role: str) -> str:
+    """
+    Return human-readable display name for a role.
+    
+    Args:
+        role: Role identifier
+    
+    Returns:
+        Human-readable role name
+    """
+    role_names = {
+        'structure': 'Reference structure',
+        'topology': 'Topology file (main)',
+        'include': 'Include file',
+        'trajectory': 'Trajectory file',
+        'forcefield': 'Force field archive',
+        'ensemble_pdb': 'Ensemble PDB',
+        'other': 'Other'
+    }
+    return role_names.get(role, role)
+
+
+def detect_role_conflicts(files: list, mode: str = 'trajectory') -> dict:
+    """
+    Detect files with conflicting exclusive roles.
+    
+    In trajectory mode, only one file should have 'topology' role.
+    
+    Args:
+        files: List of file data dicts
+        mode: Input mode ('trajectory' or 'ensemble')
+    
+    Returns:
+        Dict with 'topology' key containing list of file keys that have
+        that role (conflict if len > 1)
+    """
+    conflicts = {'topology': []}
+    
+    if mode == 'ensemble':
+        # No conflicts to detect in ensemble mode
+        return conflicts
+    
+    # Filter to current mode files only
+    files_for_mode = [f for f in files if f.get('uploaded_for_mode', 'trajectory') == mode]
+    
+    for f in files_for_mode:
+        role = f.get('role', get_default_role(f.get('file_type', ''), mode))
+        file_key = f.get('temp_file_id') or f.get('example_path') or f.get('filename')
+        
+        if role == 'topology':
+            conflicts['topology'].append(file_key)
+    
+    return conflicts
+
+
+def create_purpose_cell(file_data: dict, file_key: str, input_mode: str, conflicts: dict = None) -> html.Div:
+    """
+    Create the purpose cell for a file row - either a dropdown or static text.
+    
+    Args:
+        file_data: File metadata dict
+        file_key: Unique key for the file (for pattern matching)
+        input_mode: Current input mode ('trajectory' or 'ensemble')
+        conflicts: Dict of role conflicts from detect_role_conflicts()
+    
+    Returns:
+        html.Div containing either a dropdown or static text
+    """
+    file_type = file_data.get('file_type', '')
+    role_options = get_role_options(file_type, input_mode)
+    current_role = file_data.get('role', get_default_role(file_type, input_mode))
+    
+    # Check if this file has a conflict
+    has_conflict = False
+    if conflicts:
+        if file_key in conflicts.get('topology', []) and len(conflicts.get('topology', [])) > 1:
+            has_conflict = True
+    
+    # Determine border style based on conflict state
+    dropdown_style = {
+        'fontSize': '0.8rem',
+        'minWidth': '150px',
+    }
+    if has_conflict:
+        dropdown_style['border'] = '2px solid #dc3545'
+        dropdown_style['borderRadius'] = '4px'
+    
+    if role_options:
+        # Multiple options - render dropdown
+        purpose_content = html.Div([
+            dcc.Dropdown(
+                id={'type': 'file-role', 'index': file_key},
+                options=role_options,
+                value=current_role,
+                clearable=False,
+                style=dropdown_style,
+                className='file-role-dropdown'
+            ),
+            # Warning icon for conflicts
+            html.I(
+                className="fas fa-exclamation-triangle",
+                style={
+                    'color': '#dc3545',
+                    'marginLeft': '8px',
+                    'display': 'inline-block' if has_conflict else 'none'
+                },
+                title=f"Conflict: Another file also has this role" if has_conflict else ""
+            ) if has_conflict else None
+        ], style={'display': 'flex', 'alignItems': 'center', 'flex': '2.5'})
+    else:
+        # Fixed role - render static text
+        purpose_text = get_role_display_name(current_role)
+        purpose_content = html.Div(
+            purpose_text,
+            style={'flex': '2.5', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontStyle': 'italic'}
+        )
+    
+    return purpose_content
+
+
 def extract_toc_from_markdown(content: str) -> list:
     """
     Extract table of contents from markdown content by parsing headings.
@@ -2575,6 +2763,7 @@ def display_page(pathname):
         # Main page
         return html.Div([
             dcc.Store(id='uploaded-files-store', data=[]),
+            dcc.Store(id='file-role-conflicts', data={'structure': [], 'topology': []}),
             dcc.Store(id='session-id-store', data=session_id),  # Session ID for temp file storage
             dcc.Store(id='gromacs-versions-store', data=None),  # Store for available GROMACS versions
             dcc.Store(id='tab-focus-trigger', data=0),  # Trigger for tab focus refresh
@@ -3015,7 +3204,8 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
             'file_type': file_type.value,
             'upload_time': datetime.utcnow().isoformat(),
             'uploaded_for_mode': input_mode,  # Track which mode this file was uploaded for
-            'model_count': None  # Will be set for PDB files in ensemble mode
+            'model_count': None,  # Will be set for PDB files in ensemble mode
+            'role': get_default_role(file_type.value, input_mode)  # Default role based on file type
         }
         
         # Validate PDB files for multi-model content in ensemble mode
@@ -3096,14 +3286,20 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
         'borderRadius': '5px 5px 0 0'
     })
     
+    # Detect role conflicts for visual feedback
+    conflicts = detect_role_conflicts(files, input_mode)
+    has_any_conflict = len(conflicts.get('topology', [])) > 1
+    
     # Create table rows for current mode's files only
     file_list_items = [table_header]
     for idx, file_data in enumerate(files_for_current_mode):
         size_mb = file_data['size_bytes'] / (1024 * 1024)
         file_type = file_data['file_type']
-        purpose = get_file_purpose(file_type, input_mode)
-        # Use temp_file_id as unique key for reliable removal
-        file_key = file_data.get('temp_file_id', f"{file_data['filename']}_{idx}")
+        # Use temp_file_id or example_path as unique key for reliable removal
+        file_key = file_data.get('temp_file_id') or file_data.get('example_path') or f"{file_data['filename']}_{idx}"
+        
+        # Create purpose cell (dropdown or static text)
+        purpose_cell = create_purpose_cell(file_data, file_key, input_mode, conflicts)
         
         file_list_items.append(
             html.Div([
@@ -3116,10 +3312,7 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
                     f".{file_type.upper()}",
                     style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontWeight': '500'}
                 ),
-                html.Div(
-                    purpose,
-                    style={'flex': '2.5', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontStyle': 'italic'}
-                ),
+                purpose_cell,
                 html.Div(
                     f"{size_mb:.1f} MB",
                     style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'textAlign': 'right'}
@@ -3151,6 +3344,16 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
                 'backgroundColor': '#ffffff',
                 'transition': 'all 0.3s ease',
             }, className='file-table-row')
+        )
+    
+    # Add conflict warning message if there are conflicts
+    if has_any_conflict:
+        validation_messages.append(
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px', 'color': '#dc3545'}),
+                html.Strong("Role conflict: "),
+                f"Multiple files assigned as Topology ({len(conflicts['topology'])} files). Please use the dropdown to set one as 'Include file'."
+            ], className="alert alert-danger", style={'marginTop': '10px'})
         )
     
     # Validation based on input mode - only check files for current mode
@@ -3716,14 +3919,20 @@ def update_file_display_on_removal(stored_files, input_mode):
         'borderRadius': '5px 5px 0 0'
     })
     
+    # Detect role conflicts for visual feedback
+    conflicts = detect_role_conflicts(files, input_mode)
+    has_any_conflict = len(conflicts.get('topology', [])) > 1
+    
     # Create table rows - only for current mode files
     file_list_items = [table_header]
     for idx, file_data in enumerate(files_for_current_mode):
         size_mb = file_data['size_bytes'] / (1024 * 1024)
         file_type = file_data['file_type']
-        purpose = get_file_purpose(file_type, input_mode)  # Use module-level function
-        # Use temp_file_id as unique key for reliable removal
-        file_key = file_data.get('temp_file_id', f"{file_data['filename']}_{idx}")
+        # Use temp_file_id or example_path as unique key for reliable removal
+        file_key = file_data.get('temp_file_id') or file_data.get('example_path') or f"{file_data['filename']}_{idx}"
+        
+        # Create purpose cell (dropdown or static text)
+        purpose_cell = create_purpose_cell(file_data, file_key, input_mode, conflicts)
         
         file_list_items.append(
             html.Div([
@@ -3736,10 +3945,7 @@ def update_file_display_on_removal(stored_files, input_mode):
                     f".{file_type.upper()}",
                     style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontWeight': '500'}
                 ),
-                html.Div(
-                    purpose,
-                    style={'flex': '2.5', 'fontSize': '0.8rem', 'color': '#6c757d', 'fontStyle': 'italic'}
-                ),
+                purpose_cell,
                 html.Div(
                     f"{size_mb:.1f} MB",
                     style={'flex': '0.6', 'fontSize': '0.8rem', 'color': '#6c757d', 'textAlign': 'right'}
@@ -3775,6 +3981,17 @@ def update_file_display_on_removal(stored_files, input_mode):
     
     # Validation based on input mode - only check files for current mode
     validation_messages = []
+    
+    # Add conflict warning message if there are conflicts
+    if has_any_conflict:
+        validation_messages.append(
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px', 'color': '#dc3545'}),
+                html.Strong("Role conflict: "),
+                f"Multiple files assigned as Topology ({len(conflicts['topology'])} files). Please use the dropdown to set one as 'Include file'."
+            ], className="alert alert-danger", style={'marginTop': '10px'})
+        )
+    
     if input_mode == 'ensemble':
         # For ensemble mode, only need a multi-model PDB file
         has_pdb = any(f['file_type'] == 'pdb' for f in files_for_current_mode)
@@ -3884,6 +4101,76 @@ def clear_upload_on_removal(n_clicks_timestamp):
         if triggered_value and triggered_value > 0:
             return None
     return no_update
+
+
+# Update file role when user changes the dropdown selection
+@app.callback(
+    Output('uploaded-files-store', 'data', allow_duplicate=True),
+    [Input({'type': 'file-role', 'index': ALL}, 'value')],
+    [State('uploaded-files-store', 'data'),
+     State({'type': 'file-role', 'index': ALL}, 'id')],
+    prevent_initial_call=True
+)
+def update_file_role(role_values, stored_files, role_ids):
+    """Update file role in store when user changes dropdown selection."""
+    logger.info(f"update_file_role callback triggered: role_values={role_values}, role_ids={role_ids}")
+    
+    ctx = callback_context
+    
+    # Check if callback was actually triggered by a value change
+    if not ctx.triggered:
+        logger.info("No trigger, skipping")
+        return no_update
+    
+    if not stored_files or not role_values or not role_ids:
+        logger.info("No stored files or role values, skipping")
+        return no_update
+    
+    # Get the triggered dropdown's ID
+    triggered_id = ctx.triggered_id
+    logger.info(f"triggered_id: {triggered_id}")
+    
+    if not triggered_id or not isinstance(triggered_id, dict):
+        logger.info("No valid triggered_id dict, skipping")
+        return no_update
+    
+    if triggered_id.get('type') != 'file-role':
+        logger.info("Not a file-role dropdown, skipping")
+        return no_update
+    
+    # Get the file key from the triggered dropdown's index
+    file_key = triggered_id.get('index')
+    logger.info(f"Role change for file_key: {file_key}")
+    
+    # Find the corresponding role value
+    new_role = None
+    for role_id, role_val in zip(role_ids, role_values):
+        if role_id.get('index') == file_key:
+            new_role = role_val
+            break
+    
+    if new_role is None:
+        logger.info("Could not find new role value, skipping")
+        return no_update
+    
+    # Update the role in stored_files
+    updated = False
+    for file_data in stored_files:
+        # Match by temp_file_id or example_path
+        key = file_data.get('temp_file_id') or file_data.get('example_path')
+        if key == file_key:
+            logger.info(f"Updating role for {file_data['filename']}: {file_data.get('role')} -> {new_role}")
+            file_data['role'] = new_role
+            updated = True
+            break
+    
+    if not updated:
+        logger.info(f"Could not find file with key {file_key} to update")
+        return no_update
+    
+    logger.info(f"Role updated successfully, returning updated files")
+    return stored_files
+
 
 @app.callback(
     Output('uploaded-files-store', 'data', allow_duplicate=True),
@@ -4016,6 +4303,19 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         logger.warning(f"No files uploaded for {current_mode} mode")
         return html.Div(f"No files uploaded for {current_mode.title()} mode. Please upload the required files.", className="alert alert-danger"), no_update
     
+    # Check for role conflicts (e.g., multiple topology files)
+    conflicts = detect_role_conflicts(uploaded_files, current_mode)
+    has_topology_conflict = len(conflicts.get('topology', [])) > 1
+    
+    if has_topology_conflict:
+        logger.warning(f"Topology role conflict detected: {len(conflicts['topology'])} files")
+        return html.Div([
+            html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
+            html.Strong("Role conflict: "),
+            f"Multiple files assigned as Topology ({len(conflicts['topology'])} files). ",
+            "Please use the 'Purpose in gRINN' dropdown to set one as 'Include file'."
+        ], className="alert alert-danger"), no_update
+    
     # Validate ensemble mode: exactly one PDB file required
     if current_mode == 'ensemble':
         pdb_files = [f for f in files_for_submission if f.get('file_type') == 'pdb']
@@ -4038,18 +4338,22 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         # Step 1: Create job in backend
         files_info = []
         for file_data in files_for_submission:
-            # Determine file role based on mode and type
+            # Use role from file_data if available (user may have changed it via dropdown)
             file_type = file_data.get('file_type', 'unknown')
-            if current_mode == 'ensemble' and file_type == 'pdb':
-                role = 'ensemble_pdb'
-            elif file_type in ['pdb', 'gro']:
-                role = 'structure'
-            elif file_type in ['xtc', 'trr']:
-                role = 'trajectory'
-            elif file_type in ['top', 'tpr', 'itp']:
-                role = 'topology'
-            else:
-                role = 'other'
+            role = file_data.get('role')
+            
+            # Fallback: determine role based on mode and type if not set
+            if not role:
+                if current_mode == 'ensemble' and file_type == 'pdb':
+                    role = 'ensemble_pdb'
+                elif file_type in ['pdb', 'gro']:
+                    role = 'structure'
+                elif file_type in ['xtc', 'trr']:
+                    role = 'trajectory'
+                elif file_type in ['top', 'tpr', 'itp']:
+                    role = 'topology'
+                else:
+                    role = 'other'
             
             files_info.append({
                 'filename': file_data['filename'],
