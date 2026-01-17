@@ -1534,21 +1534,43 @@ def get_job_logs(job_id):
         # If still no logs, check job status for error messages or current step
         if not logs_text or logs_text.strip() == "":
             # If preflight container was removed, attempt to return persisted preflight logs.
+            preflight_content = ""
             try:
                 output_dir = storage_manager.get_output_directory(job_id)
                 preflight_log_path = os.path.join(output_dir, 'preflight.log')
                 if os.path.exists(preflight_log_path) and os.path.getsize(preflight_log_path) > 0:
-                    last_lines = deque(maxlen=tail)
+                    # Read full preflight.log for error cases (contains detailed GROMACS output)
                     with open(preflight_log_path, 'r', encoding='utf-8', errors='replace') as f:
-                        for line in f:
-                            last_lines.append(line)
-                    logs_text = "".join(last_lines)
+                        preflight_content = f.read()
+                    logs_text = preflight_content
+                    logger.info(f"Read {len(preflight_content)} characters from preflight.log for job {job_id}")
             except Exception as e:
                 logger.warning(f"Could not read preflight.log for job {job_id}: {e}")
+            
+            # Also check for calc.log which contains detailed GROMACS error messages (for non-preflight failures)
+            try:
+                output_dir = storage_manager.get_output_directory(job_id)
+                calc_log_path = os.path.join(output_dir, 'calc.log')
+                if os.path.exists(calc_log_path) and os.path.getsize(calc_log_path) > 0:
+                    with open(calc_log_path, 'r', encoding='utf-8', errors='replace') as f:
+                        calc_content = f.read()
+                    if calc_content.strip():
+                        if logs_text:
+                            logs_text += "\n\n=== Detailed Log (calc.log) ===\n" + calc_content
+                        else:
+                            logs_text = "=== Detailed Log (calc.log) ===\n" + calc_content
+                        logger.info(f"Appended {len(calc_content)} characters from calc.log for job {job_id}")
+            except Exception as e:
+                logger.warning(f"Could not read calc.log for job {job_id}: {e}")
 
             job = database_manager.get_job(job_id)
             if job and job.error_message:
-                logs_text = f"=== Job Error ===\n{job.error_message}\n\n=== Container Status ===\nContainer not found or no logs available."
+                # Include both error message AND any log content we found
+                error_section = f"=== Job Error ===\n{job.error_message}"
+                if logs_text:
+                    logs_text = f"{error_section}\n\n=== Raw Logs ===\n{logs_text}"
+                else:
+                    logs_text = f"{error_section}\n\n=== Container Status ===\nContainer not found or no logs available."
             elif job and job.current_step:
                 logs_text = f"=== Current Status ===\n{job.current_step}\n\n=== Container Logs ===\nWaiting for container logs...\n\nNote: Logs will appear once the container starts processing.\nIf the job is queued, please wait for it to start."
             else:

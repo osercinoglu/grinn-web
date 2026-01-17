@@ -536,6 +536,7 @@ def extract_toc_from_markdown(content: str) -> list:
 def inject_heading_anchors(content: str) -> str:
     """
     Replace markdown headings with HTML heading tags that include IDs for TOC navigation.
+    Preserves content inside fenced code blocks.
     
     Args:
         content: Original markdown content
@@ -555,8 +556,24 @@ def inject_heading_anchors(content: str) -> str:
         # Replace markdown heading with HTML heading that has an ID
         return f'<h{level} id="{slug}">{title}</h{level}>'
     
+    # Split content by fenced code blocks to avoid modifying headings inside them
+    # Pattern matches ```...``` blocks (with optional language specifier)
+    code_block_pattern = re.compile(r'(```[\s\S]*?```)', re.MULTILINE)
+    parts = code_block_pattern.split(content)
+    
     heading_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
-    return heading_pattern.sub(replace_heading, content)
+    
+    # Process only non-code-block parts
+    result_parts = []
+    for i, part in enumerate(parts):
+        if part.startswith('```'):
+            # This is a code block - keep it unchanged
+            result_parts.append(part)
+        else:
+            # This is regular content - process headings
+            result_parts.append(heading_pattern.sub(replace_heading, part))
+    
+    return ''.join(result_parts)
 
 
 def read_help_content() -> tuple:
@@ -2974,6 +2991,22 @@ def update_mode_instructions(mode):
                     'fontSize': '0.85rem', 
                     'backgroundColor': '#d1ecf1', 
                     'border': '1px solid #17a2b8',
+                    'borderRadius': '5px',
+                    'padding': '8px 10px',
+                    'marginTop': '8px'
+                }),
+                
+                html.Div([
+                    html.I(className="fas fa-info-circle", style={'marginRight': '6px', 'color': '#fd7e14'}),
+                    html.Strong("Data Preparation: ", style={'color': '#854d00'}),
+                    html.Span("Atom numbers in your structure (.pdb/.gro) and topology (.top) files must match. ", style={'color': '#854d00'}),
+                    html.A("See data preparation guide", href="/help#34-preparing-input-data-for-trajectory-mode", target="_blank", 
+                           style={'color': '#0056b3', 'textDecoration': 'underline'}),
+                    html.Span(" for instructions.", style={'color': '#854d00'})
+                ], style={
+                    'fontSize': '0.85rem', 
+                    'backgroundColor': '#ffe5cc', 
+                    'border': '1px solid #fd7e14',
                     'borderRadius': '5px',
                     'padding': '8px 10px',
                     'marginTop': '8px'

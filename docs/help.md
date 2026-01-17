@@ -82,6 +82,35 @@ The PDB file should contain multiple conformations separated by `MODEL` and `END
 - **Structure/topology files**: Up to 10 MB
 - **Frame/model number**: Up to 200
 
+### 3.4 Preparing Input Data for Trajectory Mode
+
+⚠️ **Important:** The atom numbers in your structure file (PDB/GRO) and topology file (TOP) **must match exactly**. A mismatch will cause job failures.
+
+#### Recommended Workflow
+
+The approach with the lowest probability of receiving atom mismatch errors is to use files directly from your GROMACS simulation setup. However, this is often not ideal, as it leads to processing of unnecessarily large trajectory files that include waters/ions and/or other components that used in interaction energy calculation. 
+
+Therefore, the best approach to prepare your input data is to include **only those parts of the system that will be included in the interaction energy calculation**. This often involves removing water/solvent atoms from structure, trajectory, and topology files. Below is an example gromacs workflow to yield protein-only input files. You may need to customize this workflow for your specific needs.
+
+#### Using Protein-only (i.e. dry) Structure, Trajectory, and Topology Files (Removing Water/Ions)
+
+If you need to remove water and ions for analysis, process **both** structure and trajectory consistently:
+
+```bash
+# Create an index group for protein only
+echo "q" | gmx make_ndx -f md.gro -o protein.ndx
+
+# Extract protein-only structure
+echo "Protein" | gmx editconf -f md.gro -o protein.gro -n protein.ndx
+
+# Extract protein-only trajectory  
+echo "Protein" | gmx trjconv -f md.xtc -s md.tpr -o protein.xtc -n protein.ndx
+
+# Generate new topology for protein only
+gmx pdb2gmx -f protein.gro -o protein_processed.gro -p protein.top -water none
+# Alternatively, you may also opt to remove unnecessary molecules from the end of your topology file. 
+```
+
 ---
 
 ## 4. Running Analysis
@@ -421,6 +450,16 @@ i-gRINN is entirely free, although there are limitations applied to the input fi
 - Maximum trajectory file size: 100 MB
 - Maximum structure/topology file size: 10 MB
 - For larger files, consider using the standalone gRINN tool
+
+#### Why did my job fail with an atom number mismatch error?
+
+This error occurs when the number of atoms in your structure file (PDB/GRO) doesn't match the number of atoms defined in your topology file (TOP). Common causes include:
+
+- Removing water molecules from the structure but not updating the topology
+- Using a structure with different hydrogen atoms than expected by the topology
+- Post-processing the structure file after generating the topology
+
+**Solution:** Use the original structure file from your simulation setup, or regenerate your topology to match your current structure. See [Section 3.4: Preparing Input Data](#34-preparing-input-data-for-trajectory-mode) for detailed instructions.
 
 #### How do I prepare a multi-model PDB for Ensemble Mode?
 

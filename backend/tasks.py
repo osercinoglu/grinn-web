@@ -439,10 +439,27 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
 
                 if preflight_exit_code != 0:
                     summary = _extract_preflight_summary(preflight_logs)
-                    error_message = _truncate_for_db(
-                        "Preflight validation failed. Please fix the input files/parameters and resubmit.\n\n"
-                        + (summary or "(No additional details available.)")
-                    )
+                    
+                    # Include raw preflight logs which contain detailed GROMACS error output
+                    # Note: calc.log doesn't exist during preflight since logging isn't initialized yet
+                    # The GROMACS errors are captured in preflight_logs (container stdout/stderr)
+                    
+                    # Build error message with summary and full log output
+                    error_parts = [
+                        "Preflight validation failed. Please fix the input files/parameters and resubmit.\n\n",
+                        summary or "(No additional details available.)"
+                    ]
+                    
+                    # Add raw container output for detailed GROMACS errors (last 15KB)
+                    if preflight_logs and len(preflight_logs.strip()) > 0:
+                        # Truncate to last 15KB if too long
+                        raw_logs = preflight_logs
+                        if len(raw_logs) > 15000:
+                            raw_logs = "... (truncated) ...\n" + raw_logs[-15000:]
+                        error_parts.append("\n\n=== Full Container Output ===\n")
+                        error_parts.append(raw_logs)
+                    
+                    error_message = _truncate_for_db("".join(error_parts))
                     _update_failed_preserving_error("Preflight failed", error_message)
                     raise RuntimeError("Preflight failed")
 
