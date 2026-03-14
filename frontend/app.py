@@ -512,24 +512,22 @@ def extract_toc_from_markdown(content: str) -> list:
     """
     import re
     toc = []
-    
-    # Match markdown headings (# ## ### etc.)
+
     heading_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
-    
-    for match in heading_pattern.finditer(content):
-        level = len(match.group(1))  # Number of # symbols
-        title = match.group(2).strip()
-        
-        # Generate slug ID (lowercase, replace spaces with hyphens, remove special chars)
-        slug = re.sub(r'[^\w\s-]', '', title.lower())
-        slug = re.sub(r'[\s]+', '-', slug)
-        
-        toc.append({
-            'level': level,
-            'title': title,
-            'id': slug
-        })
-    
+    code_block_pattern = re.compile(r'(```[\s\S]*?```)', re.MULTILINE)
+
+    # Split by fenced code blocks; only scan non-code parts for headings
+    parts = code_block_pattern.split(content)
+    for part in parts:
+        if part.startswith('```'):
+            continue  # skip code blocks
+        for match in heading_pattern.finditer(part):
+            level = len(match.group(1))
+            title = match.group(2).strip()
+            slug = re.sub(r'[^\w\s-]', '', title.lower())
+            slug = re.sub(r'[\s]+', '-', slug)
+            toc.append({'level': level, 'title': title, 'id': slug})
+
     return toc
 
 
@@ -598,6 +596,23 @@ def read_help_content() -> tuple:
     except Exception as e:
         logger.error(f"Error reading help file: {e}")
         return f"# Help\n\nError loading help documentation: {str(e)}", []
+
+
+def read_tutorial_content() -> tuple:
+    """Read tutorial markdown file and extract TOC."""
+    tutorial_file_path = os.path.join(os.path.dirname(__file__), '..', 'docs', 'tutorial.md')
+    try:
+        with open(tutorial_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        toc = extract_toc_from_markdown(content)
+        content_with_anchors = inject_heading_anchors(content)
+        return content_with_anchors, toc
+    except FileNotFoundError:
+        logger.error(f"Tutorial file not found: {tutorial_file_path}")
+        return "# Tutorial\n\nTutorial documentation is coming soon.", []
+    except Exception as e:
+        logger.error(f"Error reading tutorial file: {e}")
+        return f"# Tutorial\n\nError loading tutorial documentation: {str(e)}", []
 
 
 # Initialize Dash app
@@ -1827,8 +1842,27 @@ def create_header():
                             'marginRight': '10px'
                         }
                     ),
-                    html.Button(
+                    html.A(
                         [html.I(className="fas fa-graduation-cap", style={'marginRight': '6px'}), "Tutorial"],
+                        href="/tutorial",
+                        target="_blank",
+                        id="nav-tutorial-link",
+                        className="nav-link",
+                        style={
+                            'display': 'inline-block',
+                            'padding': '8px 16px',
+                            'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                            'color': '#6c757d',
+                            'textDecoration': 'none',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'border': '1px solid rgba(108, 117, 125, 0.3)',
+                            'marginRight': '10px'
+                        }
+                    ),
+                    html.Button(
+                        [html.I(className="fas fa-map-signs", style={'marginRight': '6px'}), "Tour"],
                         id="start-tutorial-btn",
                         className="nav-link",
                         style={
@@ -2639,16 +2673,18 @@ def create_help_page():
                         'borderBottom': '2px solid rgba(90, 122, 96, 0.2)'
                     }),
                     html.Div(toc_links, id='help-toc-links')
-                ], style={
-                    'position': 'sticky',
-                    'top': '20px'
-                })
+                ])
             ], style={
                 'width': '250px',
                 'flexShrink': '0',
                 'paddingRight': '30px',
                 'borderRight': '1px solid rgba(90, 122, 96, 0.15)',
-                'display': 'none'  # Hide on mobile, show on larger screens via media query
+                'display': 'none',  # Hide on mobile, show on larger screens via media query
+                'position': 'sticky',
+                'top': '20px',
+                'maxHeight': 'calc(100vh - 40px)',
+                'overflowY': 'auto',
+                'alignSelf': 'flex-start',
             }, className='help-toc-sidebar', id='help-toc-sidebar'),
             
             # Right content - Main documentation
@@ -2742,6 +2778,153 @@ def create_help_page():
         }),
         
         # Footer (outside the flex container for full width)
+        html.Div([
+            create_footer()
+        ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '0 20px'})
+    ])
+
+
+def create_tutorial_page():
+    """Create tutorial/documentation page with floating TOC sidebar."""
+    content, toc = read_tutorial_content()
+
+    toc_links = []
+    for item in toc:
+        indent = (item['level'] - 1) * 15
+        toc_links.append(
+            html.A(
+                item['title'],
+                href=f"#{item['id']}",
+                style={
+                    'display': 'block',
+                    'padding': '6px 12px',
+                    'paddingLeft': f'{12 + indent}px',
+                    'color': '#5A7A60' if item['level'] == 1 else '#666',
+                    'textDecoration': 'none',
+                    'fontSize': '0.85rem' if item['level'] > 1 else '0.95rem',
+                    'fontWeight': '500' if item['level'] == 1 else '400',
+                    'borderLeft': '3px solid transparent',
+                    'transition': 'all 0.2s ease'
+                }
+            )
+        )
+
+    return html.Div([
+        dcc.Location(id='tutorial-url', refresh=False),
+        dcc.Store(id='tutorial-scroll-trigger', data=0),
+
+        html.Div([
+            html.Div([
+                html.Div([
+                    html.H5([
+                        html.I(className="fas fa-list", style={'marginRight': '8px'}),
+                        "Contents"
+                    ], style={
+                        'color': '#5A7A60',
+                        'marginBottom': '15px',
+                        'paddingBottom': '10px',
+                        'borderBottom': '2px solid rgba(90, 122, 96, 0.2)'
+                    }),
+                    html.Div(toc_links, id='tutorial-toc-links')
+                ])
+            ], style={
+                'width': '250px',
+                'flexShrink': '0',
+                'paddingRight': '30px',
+                'borderRight': '1px solid rgba(90, 122, 96, 0.15)',
+                'display': 'none',
+                'position': 'sticky',
+                'top': '20px',
+                'maxHeight': 'calc(100vh - 40px)',
+                'overflowY': 'auto',
+                'alignSelf': 'flex-start',
+            }, className='help-toc-sidebar'),
+
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.A(
+                            [html.I(className="fas fa-arrow-left", style={'marginRight': '8px'}), "Back to Main"],
+                            href="/",
+                            style={
+                                'fontSize': '0.9rem',
+                                'padding': '8px 16px',
+                                'display': 'inline-block',
+                                'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                                'color': '#6c757d',
+                                'textDecoration': 'none',
+                                'border': '1px solid rgba(108, 117, 125, 0.3)',
+                                'borderRadius': '5px',
+                                'fontWeight': '500'
+                            }
+                        )
+                    ], style={'marginBottom': '20px'}),
+                ]),
+
+                html.Div([
+                    dcc.Markdown(
+                        content,
+                        id='tutorial-markdown-content',
+                        dangerously_allow_html=True,
+                        style={
+                            'lineHeight': '1.8',
+                            'fontSize': '1rem'
+                        },
+                        className='help-markdown-content'
+                    )
+                ], style={
+                    'backgroundColor': 'white',
+                    'padding': '40px',
+                    'borderRadius': '10px',
+                    'boxShadow': '0 2px 10px rgba(0,0,0,0.08)',
+                    'border': '1px solid rgba(90, 122, 96, 0.1)'
+                }),
+
+                html.Div([
+                    html.A(
+                        [html.I(className="fas fa-home", style={'marginRight': '8px'}), "Submit a Job"],
+                        href="/",
+                        style={
+                            'fontSize': '0.95rem',
+                            'padding': '10px 20px',
+                            'display': 'inline-block',
+                            'backgroundColor': '#5A7A60',
+                            'color': 'white',
+                            'textDecoration': 'none',
+                            'borderRadius': '5px',
+                            'fontWeight': '500',
+                            'marginRight': '10px'
+                        }
+                    ),
+                    html.A(
+                        [html.I(className="fas fa-list-alt", style={'marginRight': '8px'}), "View Job Queue"],
+                        href="/queue",
+                        style={
+                            'fontSize': '0.95rem',
+                            'padding': '10px 20px',
+                            'display': 'inline-block',
+                            'backgroundColor': 'rgba(90, 122, 96, 0.1)',
+                            'color': '#5A7A60',
+                            'textDecoration': 'none',
+                            'border': '1px solid rgba(90, 122, 96, 0.3)',
+                            'borderRadius': '5px',
+                            'fontWeight': '500'
+                        }
+                    )
+                ], style={'textAlign': 'center', 'marginTop': '40px'})
+            ], style={
+                'flex': '1',
+                'minWidth': '0',
+                'paddingLeft': '30px'
+            }, className='help-main-content')
+        ], style={
+            'display': 'flex',
+            'maxWidth': '1200px',
+            'margin': '0 auto',
+            'padding': '20px',
+            'minHeight': '100vh'
+        }),
+
         html.Div([
             create_footer()
         ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '0 20px'})
@@ -2866,6 +3049,32 @@ def display_page(pathname):
                 create_submit_section(),
                 # Submission status area
                 html.Div(id="submission-status", children=[], style={'marginTop': '12px'}),
+                # Job submission success modal
+                dbc.Modal([
+                    dbc.ModalHeader(
+                        dbc.ModalTitle([
+                            html.I(className="fas fa-check-circle",
+                                   style={'marginRight': '10px', 'color': '#5A7A60'}),
+                            "Job Submitted"
+                        ], style={'fontSize': '1.1rem'}),
+                        close_button=False
+                    ),
+                    dbc.ModalBody(
+                        html.Div(id="submission-modal-content")
+                    ),
+                    dbc.ModalFooter(
+                        html.Button("Close", id="close-submission-modal-btn", n_clicks=0, style={
+                            'fontSize': '0.9rem',
+                            'padding': '8px 20px',
+                            'backgroundColor': 'rgba(90, 122, 96, 0.1)',
+                            'color': '#5A7A60',
+                            'border': '1px solid rgba(90, 122, 96, 0.3)',
+                            'borderRadius': '5px',
+                            'fontWeight': '500',
+                            'cursor': 'pointer'
+                        })
+                    )
+                ], id="job-submission-modal", is_open=False, centered=True, size="md"),
                 # Footer
                 create_footer()
             ], style={'maxWidth': '1200px', 'margin': '0 auto'})
@@ -2891,6 +3100,9 @@ def display_page(pathname):
     elif pathname == '/help':
         # Help/documentation page
         return create_help_page()
+    elif pathname == '/tutorial':
+        # Tutorial/documentation page
+        return create_tutorial_page()
     else:
         # 404 page
         return html.Div([
@@ -4475,7 +4687,9 @@ def remove_file(n_clicks_timestamp, stored_files, session_id):
 # Add div to show submission status
 @app.callback(
     [Output('submission-status', 'children'),
-     Output('uploaded-files-store', 'data', allow_duplicate=True)],
+     Output('uploaded-files-store', 'data', allow_duplicate=True),
+     Output('job-submission-modal', 'is_open', allow_duplicate=True),
+     Output('submission-modal-content', 'children')],
     [Input('submit-job-btn', 'n_clicks')],
     [State('skip-frames', 'value'),
      State('initpairfilter-cutoff', 'value'),
@@ -4497,11 +4711,11 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
     
     if not submit_clicks:
         logger.info("No submit clicks, returning no_update")
-        return no_update, no_update
-        
+        return no_update, no_update, no_update, no_update
+
     if not uploaded_files:
         logger.warning("No uploaded files for job submission")
-        return html.Div("Please upload files to submit a job.", className="alert alert-danger"), no_update
+        return html.Div("Please upload files to submit a job.", className="alert alert-danger"), no_update, False, no_update
     
     # Filter files to only include those uploaded for the current mode
     current_mode = input_mode or 'trajectory'
@@ -4509,7 +4723,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
     
     if not files_for_submission:
         logger.warning(f"No files uploaded for {current_mode} mode")
-        return html.Div(f"No files uploaded for {current_mode.title()} mode. Please upload the required files.", className="alert alert-danger"), no_update
+        return html.Div(f"No files uploaded for {current_mode.title()} mode. Please upload the required files.", className="alert alert-danger"), no_update, False, no_update
     
     # Check for role conflicts (e.g., multiple topology files)
     conflicts = detect_role_conflicts(uploaded_files, current_mode)
@@ -4523,7 +4737,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             html.Strong("Role conflict: "),
             f"Multiple files assigned as Topology ({len(conflicts['topology'])} files). ",
             "Please use the 'Purpose in gRINN' dropdown to set one as 'Include file'."
-        ], className="alert alert-danger"), no_update
+        ], className="alert alert-danger"), no_update, False, no_update
     
     # Handle multiple structure files - only use the selected one
     if has_structure_conflict and current_mode == 'trajectory':
@@ -4557,13 +4771,13 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                 "Ensemble mode requires a multi-model PDB file. Please upload one."
-            ], className="alert alert-danger"), no_update
+            ], className="alert alert-danger"), no_update, False, no_update
         if len(pdb_files) > 1:
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                 f"Ensemble mode requires exactly ONE PDB file, but {len(pdb_files)} were found. ",
                 "Please remove extra files and keep only the multi-model ensemble PDB."
-            ], className="alert alert-danger"), no_update
+            ], className="alert alert-danger"), no_update, False, no_update
     
     try:
         # Job name is optional - will be None if not provided
@@ -4628,7 +4842,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                 f"Failed to create job: {error_msg}"
-            ], className="alert alert-danger"), no_update
+            ], className="alert alert-danger"), no_update, False, no_update
         
         result = response.json()
         job_id = result['job_id']
@@ -4650,7 +4864,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                     return html.Div([
                         html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                         f"Example file path validation failed: {file_data['filename']}. Please reload example data."
-                    ], className="alert alert-danger"), no_update
+                    ], className="alert alert-danger"), no_update, False, no_update
                 
                 try:
                     with open(example_path, 'rb') as f:
@@ -4660,7 +4874,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                     return html.Div([
                         html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                         f"Failed to read example file: {file_data['filename']}. Please reload example data."
-                    ], className="alert alert-danger"), no_update
+                    ], className="alert alert-danger"), no_update, False, no_update
             else:
                 # User upload: read from temp storage
                 temp_file_id = file_data.get('temp_file_id')
@@ -4677,7 +4891,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                         return html.Div([
                             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                             f"File expired or not found: {file_data['filename']}. Please re-upload."
-                        ], className="alert alert-danger"), no_update
+                        ], className="alert alert-danger"), no_update, False, no_update
                 elif 'content' in file_data:
                     # Fallback: decode from base64 content (legacy support)
                     try:
@@ -4716,15 +4930,15 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                     return html.Div([
                         html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                         error_msg
-                    ], className="alert alert-danger"), no_update
-                    
+                    ], className="alert alert-danger"), no_update, False, no_update
+
             except Exception as e:
                 error_msg = f"Upload error for {file_data['filename']}: {str(e)}"
                 logger.error(error_msg)
                 return html.Div([
                     html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                     error_msg
-                ], className="alert alert-danger"), no_update
+                ], className="alert alert-danger"), no_update, False, no_update
         
         # Step 3: Start job processing
         logger.info(f"Starting processing for job {job_id}")
@@ -4737,7 +4951,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             return html.Div([
                 html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
                 f"Files uploaded but processing failed: {error_msg}"
-            ], className="alert alert-danger"), no_update
+            ], className="alert alert-danger"), no_update, False, no_update
         
         logger.info(f"Job {job_id} submitted successfully")
         
@@ -4751,7 +4965,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                     html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
                     html.Span("Job submitted! ", style={'fontWeight': 'bold'}),
                     html.Span(f"ID: {job_id} | ", style={'marginRight': '5px'}),
-                    html.A("Monitor →", href=monitor_url, target="_blank", 
+                    html.A("Monitor →", href=monitor_url, target="_blank",
                            style={'fontWeight': 'bold', 'textDecoration': 'underline'})
                 ]),
                 html.Div([
@@ -4764,19 +4978,78 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 html.I(className="fas fa-check-circle", style={'color': 'green', 'marginRight': '8px'}),
                 html.Span("Job submitted! ", style={'fontWeight': 'bold'}),
                 html.Span(f"ID: {job_id} | ", style={'marginRight': '5px'}),
-                html.A("Monitor →", href=monitor_url, target="_blank", 
+                html.A("Monitor →", href=monitor_url, target="_blank",
                        style={'fontWeight': 'bold', 'textDecoration': 'underline'})
             ], className="alert alert-success", style={'padding': '10px 15px'})
-        
+
+        modal_content = html.Div([
+            html.Div([
+                html.Span("Job ID: ", style={'fontWeight': '500'}),
+                html.Code(job_id, style={
+                    'backgroundColor': 'rgba(90,122,96,0.08)',
+                    'padding': '2px 6px',
+                    'borderRadius': '4px',
+                    'fontSize': '0.9rem'
+                })
+            ], style={'marginBottom': '12px'}),
+            html.P("Your job has been queued for processing.",
+                   style={'color': '#5A7A60', 'marginBottom': '16px'}),
+            html.Div([
+                html.A([
+                    html.I(className="fas fa-chart-line", style={'marginRight': '6px'}),
+                    "Monitor Job"
+                ], href=f"/monitor/{job_id}", target="_blank",
+                   className="btn",
+                   style={
+                       'marginRight': '10px',
+                       'fontSize': '0.9rem',
+                       'backgroundColor': '#5A7A60',
+                       'borderColor': '#5A7A60',
+                       'color': '#fff',
+                       'backgroundImage': 'none'
+                   }),
+                html.A([
+                    html.I(className="fas fa-list", style={'marginRight': '6px'}),
+                    "View Queue"
+                ], href="/queue", target="_blank",
+                   className="btn",
+                   style={
+                       'fontSize': '0.9rem',
+                       'backgroundColor': 'rgba(90, 122, 96, 0.1)',
+                       'borderColor': 'rgba(90, 122, 96, 0.3)',
+                       'color': '#5A7A60',
+                       'backgroundImage': 'none'
+                   })
+            ], style={'marginBottom': '8px' if is_private else '0'}),
+            html.Div([
+                html.I(className="fas fa-bookmark",
+                       style={'color': '#FFA500', 'marginRight': '5px'}),
+                html.Small("Private job — bookmark the monitoring page to access it later.",
+                           style={'fontSize': '0.85rem', 'color': '#856404'})
+            ], style={'marginTop': '12px',
+                      'padding': '8px 12px',
+                      'backgroundColor': '#FFF3CD',
+                      'borderRadius': '5px'}) if is_private else html.Div()
+        ])
+
         # Clear uploaded files after successful submission
-        return success_message, []
-        
+        return success_message, [], True, modal_content
+
     except Exception as e:
         logger.error(f"Error submitting job: {e}")
         return html.Div([
             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
             f"Error submitting job: {str(e)}"
-        ], className="alert alert-danger"), no_update
+        ], className="alert alert-danger"), no_update, False, no_update
+
+@app.callback(
+    Output('job-submission-modal', 'is_open', allow_duplicate=True),
+    Input('close-submission-modal-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+def close_submission_modal(n_clicks):
+    return False
+
 
 # Monitoring page callbacks
 @app.callback(

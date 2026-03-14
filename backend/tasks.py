@@ -46,6 +46,7 @@ celery_config = {
     'task_acks_late': True,
     'worker_max_tasks_per_child': 1000,
     'task_time_limit': 3600,
+    'task_default_queue': 'grinn_jobs',  # Workers without -Q listen to this queue by default
 }
 celery_app.conf.update(celery_config)
 
