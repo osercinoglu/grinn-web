@@ -126,6 +126,8 @@ class Config:
     # Mode-specific paths for example data
     example_data_path_trajectory: Optional[str] = None  # Path to folder with trajectory mode example files
     example_data_path_ensemble: Optional[str] = None    # Path to folder with ensemble mode example files
+    example_results_path: Optional[str] = None          # Pre-computed example results (shown in all modes)
+    example_results_host_path: Optional[str] = None     # Host path override for Docker-in-Docker setups
     
     # Frontend base URL for constructing full URLs (e.g., for bookmark links)
     frontend_base_url: Optional[str] = None  # e.g., "https://grinn.example.com"
@@ -288,7 +290,16 @@ class Config:
             self.example_data_path_ensemble = ensemble_path
         else:
             self.example_data_path_ensemble = None
-        
+
+        results_path = os.getenv("EXAMPLE_RESULTS_PATH")
+        if results_path and os.path.isdir(results_path):
+            self.example_results_path = results_path
+            host = os.getenv("EXAMPLE_RESULTS_HOST_PATH")
+            self.example_results_host_path = host if host else results_path
+        else:
+            self.example_results_path = None
+            self.example_results_host_path = None
+
         # Frontend base URL for bookmark links
         self.frontend_base_url = os.getenv("FRONTEND_BASE_URL", self.frontend_base_url)
         

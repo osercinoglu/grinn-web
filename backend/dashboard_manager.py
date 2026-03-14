@@ -398,14 +398,16 @@ class DashboardManager:
         
         # For Docker-in-Docker: translate container path to host path for child container mounts
         # This is needed when webapp runs inside a container and spawns dashboard containers
-        container_storage_path = self.config.storage_path  # e.g., /data/grinn-jobs
-        host_storage_path = self.config.host_storage_path  # e.g., /home/onur/igrinn/grinn-jobs
-        
-        host_output_dir = job_output_dir
-        if host_storage_path and container_storage_path and host_storage_path != container_storage_path:
-            if job_output_dir.startswith(container_storage_path):
-                host_output_dir = job_output_dir.replace(container_storage_path, host_storage_path, 1)
-                logger.info(f"Dashboard path mapping: container={job_output_dir} -> host={host_output_dir}")
+        if job_id == 'example-ensemble':
+            host_output_dir = self.config.example_results_host_path or job_output_dir
+        else:
+            host_output_dir = job_output_dir
+            container_storage_path = self.config.storage_path  # e.g., /data/grinn-jobs
+            host_storage_path = self.config.host_storage_path  # e.g., /home/onur/igrinn/grinn-jobs
+            if host_storage_path and container_storage_path and host_storage_path != container_storage_path:
+                if job_output_dir.startswith(container_storage_path):
+                    host_output_dir = job_output_dir.replace(container_storage_path, host_storage_path, 1)
+                    logger.info(f"Dashboard path mapping: container={job_output_dir} -> host={host_output_dir}")
         
         # Find available port
         port = self.get_next_available_port()
@@ -736,6 +738,8 @@ class DashboardManager:
     
     def _get_job_output_dir(self, job_id: str) -> Optional[str]:
         """Get the output directory for a job."""
+        if job_id == 'example-ensemble':
+            return self.config.example_results_path
         # This depends on the storage implementation
         if hasattr(self.storage, 'get_output_directory'):
             # LocalStorageManager

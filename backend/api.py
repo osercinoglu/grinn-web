@@ -1048,18 +1048,22 @@ def start_dashboard(job_id):
     ensure_managers_initialized()
     
     try:
-        # Verify job exists
-        job = database_manager.get_job(job_id)
-        if not job:
-            return jsonify({'error': 'Job not found'}), 404
-        
-        # Check if job is expired
-        if job.status == JobStatus.EXPIRED.value:
-            return jsonify({
-                'error': 'Job has expired. Dashboard is no longer available.',
-                'expired': True
-            }), 410  # 410 Gone
-        
+        if job_id == 'example-ensemble':
+            if not config.example_results_path:
+                return jsonify({'error': 'Example results not configured'}), 404
+        else:
+            # Verify job exists
+            job = database_manager.get_job(job_id)
+            if not job:
+                return jsonify({'error': 'Job not found'}), 404
+
+            # Check if job is expired
+            if job.status == JobStatus.EXPIRED.value:
+                return jsonify({
+                    'error': 'Job has expired. Dashboard is no longer available.',
+                    'expired': True
+                }), 410  # 410 Gone
+
         # Start dashboard
         result = dashboard_manager.start_dashboard(job_id)
         

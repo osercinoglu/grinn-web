@@ -98,6 +98,7 @@ def _validate_example_path(file_path: str) -> bool:
 
 EXAMPLE_DATA_TRAJECTORY_AVAILABLE = _check_example_data_available(config.example_data_path_trajectory)
 EXAMPLE_DATA_ENSEMBLE_AVAILABLE = _check_example_data_available(config.example_data_path_ensemble)
+EXAMPLE_RESULTS_AVAILABLE = bool(config.example_results_path)
 
 if EXAMPLE_DATA_TRAJECTORY_AVAILABLE:
     logger.info(f"Trajectory example data available at: {config.example_data_path_trajectory}")
@@ -112,6 +113,9 @@ if EXAMPLE_DATA_ENSEMBLE_AVAILABLE:
     logger.info(f"Ensemble example files: {example_files}")
 else:
     logger.info(f"Ensemble example data not configured or folder empty (path: {config.example_data_path_ensemble})")
+
+if EXAMPLE_RESULTS_AVAILABLE:
+    logger.info(f"Example results available at: {config.example_results_path}")
 
 # Temporary upload directory for server-side file storage
 import uuid
@@ -3888,7 +3892,7 @@ def toggle_parameters(n_clicks, current_style):
 def update_example_data_section(input_mode):
     """Update example data section based on selected mode."""
     mode = input_mode or 'trajectory'
-    
+
     # Determine availability and path for current mode
     if mode == 'ensemble':
         data_available = EXAMPLE_DATA_ENSEMBLE_AVAILABLE
@@ -3898,11 +3902,37 @@ def update_example_data_section(input_mode):
         data_available = EXAMPLE_DATA_TRAJECTORY_AVAILABLE
         example_path = config.example_data_path_trajectory
         mode_label = "Trajectory"
-    
+
+    # Build the results button - single button, shown in all modes, independent of example input data
+    results_button = html.Div([
+        html.A([
+            html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
+            "View Example Results"
+        ],
+        href="/dashboard/example-ensemble",
+        target="_blank",
+        className="btn btn-outline-info btn-sm",
+        style={
+            'width': '100%',
+            'marginTop': '8px',
+            'padding': '8px 16px',
+            'fontSize': '0.85rem',
+            'display': 'block',
+            'textAlign': 'center',
+            'textDecoration': 'none',
+        })
+    ], style={'textAlign': 'center'}) if EXAMPLE_RESULTS_AVAILABLE else html.Div()
+
     if not data_available:
-        # No example data for this mode - hide the section
+        # No example input data - still show results button if available,
+        # but keep the hidden load-example-data-btn for callback compatibility
+        if EXAMPLE_RESULTS_AVAILABLE:
+            return html.Div([
+                html.Div(id="load-example-data-btn", style={'display': 'none'}),
+                results_button
+            ])
         return html.Div(id="load-example-data-btn", style={'display': 'none'})
-    
+
     # Get list of files and calculate total size
     example_files = _get_example_files(example_path)
     total_size_bytes = 0
@@ -3911,7 +3941,7 @@ def update_example_data_section(input_mode):
         if os.path.exists(file_path):
             total_size_bytes += os.path.getsize(file_path)
     total_size_mb = total_size_bytes / (1024 * 1024)
-    
+
     return html.Div([
         # Load Example Data button
         html.Div([
@@ -3928,7 +3958,7 @@ def update_example_data_section(input_mode):
                 'fontSize': '0.85rem'
             })
         ], style={'textAlign': 'center'}),
-        
+
         # Download zip link
         html.Div([
             html.A([
@@ -3944,7 +3974,9 @@ def update_example_data_section(input_mode):
                 'textDecoration': 'none',
                 'marginTop': '8px'
             })
-        ], style={'textAlign': 'center'}) if example_files else html.Div()
+        ], style={'textAlign': 'center'}) if example_files else html.Div(),
+
+        results_button
     ])
 
 
@@ -5920,27 +5952,30 @@ def update_dashboard_status(n_intervals, job_id):
     import requests
     
     try:
-        # Get job details
-        job_backend_url = f"{config.backend_url}/api/jobs/{job_id}"
-        job_response = requests.get(job_backend_url, timeout=10)
-        
-        if job_response.status_code != 200:
-            return html.Div([
-                html.Div([
-                    html.I(className="fas fa-exclamation-triangle", 
-                          style={'fontSize': '3rem', 'color': '#dc3545', 'marginBottom': '20px'}),
-                    html.H3(f"Job not found: {job_id}", style={'color': '#5A7A60'})
-                ], style={
-                    'textAlign': 'center',
-                    'paddingTop': '20vh',
-                    'display': 'flex',
-                    'flexDirection': 'column',
-                    'alignItems': 'center'
-                })
-            ])
-        
-        job_data = job_response.json()
-        job_name = job_data.get('job_name') or f"Job {job_id[:12]}"
+        if job_id == 'example-ensemble':
+            job_name = "Example Results"
+        else:
+            # Get job details
+            job_backend_url = f"{config.backend_url}/api/jobs/{job_id}"
+            job_response = requests.get(job_backend_url, timeout=10)
+
+            if job_response.status_code != 200:
+                return html.Div([
+                    html.Div([
+                        html.I(className="fas fa-exclamation-triangle",
+                              style={'fontSize': '3rem', 'color': '#dc3545', 'marginBottom': '20px'}),
+                        html.H3(f"Job not found: {job_id}", style={'color': '#5A7A60'})
+                    ], style={
+                        'textAlign': 'center',
+                        'paddingTop': '20vh',
+                        'display': 'flex',
+                        'flexDirection': 'column',
+                        'alignItems': 'center'
+                    })
+                ])
+
+            job_data = job_response.json()
+            job_name = job_data.get('job_name') or f"Job {job_id[:12]}"
         
         # Check dashboard status
         status_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/status"
