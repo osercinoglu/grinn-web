@@ -2449,7 +2449,7 @@ def create_job_monitoring_page(job_id: str):
             
             # Footer
             create_footer()
-        ], style={'maxWidth': '1000px', 'margin': '0 auto', 'padding': '20px'})
+        ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '20px'})
     ])
 
 def create_job_queue_page():
@@ -2611,7 +2611,7 @@ def create_results_page(job_id: str):
             
             # Footer
             create_footer()
-        ], style={'maxWidth': '1000px', 'margin': '0 auto', 'padding': '20px'})
+        ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '20px'})
     ])
 
 def create_dashboard_page(job_id: str):
@@ -3084,7 +3084,7 @@ def display_page(pathname):
                 ], id="job-submission-modal", is_open=False, centered=True, size="md"),
                 # Footer
                 create_footer()
-            ], style={'maxWidth': '1200px', 'margin': '0 auto'})
+            ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '20px'})
         ])
     elif pathname.startswith('/monitor/'):
         # Job monitoring page
