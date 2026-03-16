@@ -126,8 +126,10 @@ class Config:
     # Mode-specific paths for example data
     example_data_path_trajectory: Optional[str] = None  # Path to folder with trajectory mode example files
     example_data_path_ensemble: Optional[str] = None    # Path to folder with ensemble mode example files
-    example_results_path: Optional[str] = None          # Pre-computed example results (shown in all modes)
-    example_results_host_path: Optional[str] = None     # Host path override for Docker-in-Docker setups
+    example_results1_path: Optional[str] = None          # Pre-computed example results slot 1
+    example_results1_host_path: Optional[str] = None     # Host path override for slot 1 (Docker-in-Docker)
+    example_results2_path: Optional[str] = None          # Pre-computed example results slot 2
+    example_results2_host_path: Optional[str] = None     # Host path override for slot 2 (Docker-in-Docker)
     
     # Frontend base URL for constructing full URLs (e.g., for bookmark links)
     frontend_base_url: Optional[str] = None  # e.g., "https://grinn.example.com"
@@ -291,14 +293,15 @@ class Config:
         else:
             self.example_data_path_ensemble = None
 
-        results_path = os.getenv("EXAMPLE_RESULTS_PATH")
-        if results_path and os.path.isdir(results_path):
-            self.example_results_path = results_path
-            host = os.getenv("EXAMPLE_RESULTS_HOST_PATH")
-            self.example_results_host_path = host if host else results_path
-        else:
-            self.example_results_path = None
-            self.example_results_host_path = None
+        for n, env_base in [(1, 'EXAMPLE_RESULTS1'), (2, 'EXAMPLE_RESULTS2')]:
+            p = os.getenv(f"{env_base}_PATH")
+            if p and os.path.isdir(p):
+                setattr(self, f'example_results{n}_path', p)
+                h = os.getenv(f"{env_base}_HOST_PATH")
+                setattr(self, f'example_results{n}_host_path', h if h else p)
+            else:
+                setattr(self, f'example_results{n}_path', None)
+                setattr(self, f'example_results{n}_host_path', None)
 
         # Frontend base URL for bookmark links
         self.frontend_base_url = os.getenv("FRONTEND_BASE_URL", self.frontend_base_url)

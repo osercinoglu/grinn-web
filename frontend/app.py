@@ -98,7 +98,8 @@ def _validate_example_path(file_path: str) -> bool:
 
 EXAMPLE_DATA_TRAJECTORY_AVAILABLE = _check_example_data_available(config.example_data_path_trajectory)
 EXAMPLE_DATA_ENSEMBLE_AVAILABLE = _check_example_data_available(config.example_data_path_ensemble)
-EXAMPLE_RESULTS_AVAILABLE = bool(config.example_results_path)
+EXAMPLE_RESULTS1_AVAILABLE = bool(config.example_results1_path)
+EXAMPLE_RESULTS2_AVAILABLE = bool(config.example_results2_path)
 
 if EXAMPLE_DATA_TRAJECTORY_AVAILABLE:
     logger.info(f"Trajectory example data available at: {config.example_data_path_trajectory}")
@@ -114,8 +115,10 @@ if EXAMPLE_DATA_ENSEMBLE_AVAILABLE:
 else:
     logger.info(f"Ensemble example data not configured or folder empty (path: {config.example_data_path_ensemble})")
 
-if EXAMPLE_RESULTS_AVAILABLE:
-    logger.info(f"Example results available at: {config.example_results_path}")
+if EXAMPLE_RESULTS1_AVAILABLE:
+    logger.info(f"Example results (slot 1) available at: {config.example_results1_path}")
+if EXAMPLE_RESULTS2_AVAILABLE:
+    logger.info(f"Example results (slot 2) available at: {config.example_results2_path}")
 
 # Temporary upload directory for server-side file storage
 import uuid
@@ -3903,30 +3906,37 @@ def update_example_data_section(input_mode):
         example_path = config.example_data_path_trajectory
         mode_label = "Trajectory"
 
-    # Build the results button - single button, shown in all modes, independent of example input data
-    results_button = html.Div([
-        html.A([
-            html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
-            "View Example Results"
-        ],
-        href="/dashboard/example-ensemble",
-        target="_blank",
-        className="btn btn-outline-info btn-sm",
-        style={
-            'width': '100%',
-            'marginTop': '8px',
-            'padding': '8px 16px',
-            'fontSize': '0.85rem',
-            'display': 'block',
-            'textAlign': 'center',
-            'textDecoration': 'none',
-        })
-    ], style={'textAlign': 'center'}) if EXAMPLE_RESULTS_AVAILABLE else html.Div()
+    # Build the results buttons - one per configured example slot
+    _example_buttons = []
+    if EXAMPLE_RESULTS1_AVAILABLE:
+        _col = "col-6" if EXAMPLE_RESULTS2_AVAILABLE else "col-12"
+        _example_buttons.append(html.Div([
+            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
+                    "Protein Only Example Results"],
+                   href="/dashboard/example-results-1", target="_blank",
+                   className="btn btn-outline-info btn-sm",
+                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
+                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
+        ], className=_col))
+    if EXAMPLE_RESULTS2_AVAILABLE:
+        _col = "col-6" if EXAMPLE_RESULTS1_AVAILABLE else "col-12"
+        _example_buttons.append(html.Div([
+            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
+                    "Protein+Ligand Example Results"],
+                   href="/dashboard/example-results-2", target="_blank",
+                   className="btn btn-outline-info btn-sm",
+                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
+                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
+        ], className=_col))
+    results_button = html.Div(
+        html.Div(_example_buttons, className="row g-2"),
+        style={'marginTop': '8px'}
+    ) if _example_buttons else html.Div()
 
     if not data_available:
         # No example input data - still show results button if available,
         # but keep the hidden load-example-data-btn for callback compatibility
-        if EXAMPLE_RESULTS_AVAILABLE:
+        if EXAMPLE_RESULTS1_AVAILABLE or EXAMPLE_RESULTS2_AVAILABLE:
             return html.Div([
                 html.Div(id="load-example-data-btn", style={'display': 'none'}),
                 results_button
@@ -5952,8 +5962,10 @@ def update_dashboard_status(n_intervals, job_id):
     import requests
     
     try:
-        if job_id == 'example-ensemble':
-            job_name = "Example Results"
+        if job_id == 'example-results-1':
+            job_name = "Example Results (Protein-Only)"
+        elif job_id == 'example-results-2':
+            job_name = "Example Results (Protein+Ligand)"
         else:
             # Get job details
             job_backend_url = f"{config.backend_url}/api/jobs/{job_id}"

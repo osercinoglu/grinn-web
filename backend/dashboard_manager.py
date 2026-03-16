@@ -398,8 +398,10 @@ class DashboardManager:
         
         # For Docker-in-Docker: translate container path to host path for child container mounts
         # This is needed when webapp runs inside a container and spawns dashboard containers
-        if job_id == 'example-ensemble':
-            host_output_dir = self.config.example_results_host_path or job_output_dir
+        if job_id == 'example-results-1':
+            host_output_dir = self.config.example_results1_host_path or job_output_dir
+        elif job_id == 'example-results-2':
+            host_output_dir = self.config.example_results2_host_path or job_output_dir
         else:
             host_output_dir = job_output_dir
             container_storage_path = self.config.storage_path  # e.g., /data/grinn-jobs
@@ -738,8 +740,10 @@ class DashboardManager:
     
     def _get_job_output_dir(self, job_id: str) -> Optional[str]:
         """Get the output directory for a job."""
-        if job_id == 'example-ensemble':
-            return self.config.example_results_path
+        if job_id == 'example-results-1':
+            return self.config.example_results1_path
+        elif job_id == 'example-results-2':
+            return self.config.example_results2_path
         # This depends on the storage implementation
         if hasattr(self.storage, 'get_output_directory'):
             # LocalStorageManager

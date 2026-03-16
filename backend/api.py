@@ -1048,9 +1048,12 @@ def start_dashboard(job_id):
     ensure_managers_initialized()
     
     try:
-        if job_id == 'example-ensemble':
-            if not config.example_results_path:
-                return jsonify({'error': 'Example results not configured'}), 404
+        if job_id == 'example-results-1':
+            if not config.example_results1_path:
+                return jsonify({'error': 'Example results (slot 1) not configured'}), 404
+        elif job_id == 'example-results-2':
+            if not config.example_results2_path:
+                return jsonify({'error': 'Example results (slot 2) not configured'}), 404
         else:
             # Verify job exists
             job = database_manager.get_job(job_id)
