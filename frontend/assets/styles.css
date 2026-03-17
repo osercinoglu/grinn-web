@@ -661,3 +661,37 @@ body {
     align-items: center !important;
     gap: 8px !important;
 }
+
+/* ── Admonition callout boxes (> [!WARNING] / NOTE / TIP) ─────────────── */
+blockquote:has(.admonition-warning) {
+    background-color: #fff8e1;
+    border-left: 4px solid #f0a500;
+    padding: 10px 16px;
+    border-radius: 4px;
+    margin: 12px 0;
+}
+blockquote:has(.admonition-note) {
+    background-color: #e8f4fd;
+    border-left: 4px solid #2196f3;
+    padding: 10px 16px;
+    border-radius: 4px;
+    margin: 12px 0;
+}
+blockquote:has(.admonition-tip) {
+    background-color: #e8f5e9;
+    border-left: 4px solid #4caf50;
+    padding: 10px 16px;
+    border-radius: 4px;
+    margin: 12px 0;
+}
+.admonition-label {
+    display: block;
+    font-weight: 700;
+    font-size: 0.875em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.admonition-warning { color: #7d5a00; }
+.admonition-note    { color: #1565c0; }
+.admonition-tip     { color: #2e7d32; }

@@ -538,6 +538,27 @@ def extract_toc_from_markdown(content: str) -> list:
     return toc
 
 
+def inject_admonitions(content: str) -> str:
+    """
+    Replace GFM admonition markers (> [!WARNING], > [!NOTE], > [!TIP])
+    with styled HTML spans so dcc.Markdown renders them with visual callout boxes.
+    The body lines stay as-is so markdown (bold, code, lists) is processed normally.
+    """
+    import re
+    ADMONITION_MAP = {
+        'WARNING': ('admonition-warning', '⚠️ Warning'),
+        'NOTE':    ('admonition-note',    '📝 Note'),
+        'TIP':     ('admonition-tip',     '💡 Tip'),
+    }
+    def replace_marker(match):
+        kind = match.group(1).upper()
+        css_class, label = ADMONITION_MAP.get(kind, ('admonition-note', kind.capitalize()))
+        return f'> <span class="admonition-label {css_class}">{label}</span>'
+
+    pattern = re.compile(r'^> \[!(WARNING|NOTE|TIP)\]', re.MULTILINE | re.IGNORECASE)
+    return pattern.sub(replace_marker, content)
+
+
 def inject_heading_anchors(content: str) -> str:
     """
     Replace markdown headings with HTML heading tags that include IDs for TOC navigation.
@@ -595,7 +616,7 @@ def read_help_content() -> tuple:
             content = f.read()
         toc = extract_toc_from_markdown(content)
         # Inject anchor tags for TOC navigation
-        content_with_anchors = inject_heading_anchors(content)
+        content_with_anchors = inject_heading_anchors(inject_admonitions(content))
         return content_with_anchors, toc
     except FileNotFoundError:
         logger.error(f"Help file not found: {help_file_path}")
@@ -612,7 +633,7 @@ def read_tutorial_content() -> tuple:
         with open(tutorial_file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         toc = extract_toc_from_markdown(content)
-        content_with_anchors = inject_heading_anchors(content)
+        content_with_anchors = inject_heading_anchors(inject_admonitions(content))
         return content_with_anchors, toc
     except FileNotFoundError:
         logger.error(f"Tutorial file not found: {tutorial_file_path}")
