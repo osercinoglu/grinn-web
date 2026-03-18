@@ -75,4 +75,4 @@ tmp/
 *-old.*
 
 # Development/test artifacts
-grinn-worker.log
+grinn-worker.log.worktrees/
