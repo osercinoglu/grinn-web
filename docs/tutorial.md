@@ -1,7 +1,29 @@
-# gRINN Chatbot Tutorial
+# i-gRINN Web Service Tutorial
+
+This tutorial guides you through the full i-gRINN web service workflow — from submitting a molecular dynamics analysis job to visualizing results and using the AI-powered chatbot for biological interpretation. Part I covers the web interface; Part II covers the gRINN Chatbot panel that opens from within the results dashboard.
 
 ## Table of Contents
 
+### Part I — Web Interface
+- [1. Submitting a Job](#1-submitting-a-job)
+  - [1.1 Choose Your Analysis Mode](#11-choose-your-analysis-mode)
+  - [1.2 Upload Input Files](#12-upload-input-files)
+  - [1.3 Advanced Parameters](#13-advanced-parameters)
+  - [1.4 Submit the Job](#14-submit-the-job)
+- [2. Monitoring Your Job](#2-monitoring-your-job)
+  - [2.1 Progress Bar and Job Logs](#21-progress-bar-and-job-logs)
+  - [2.2 Output Files Reference](#22-output-files-reference)
+- [3. Job Queue](#3-job-queue)
+  - [3.1 Job Status Overview](#31-job-status-overview)
+  - [3.2 Private Jobs and Data Retention](#32-private-jobs-and-data-retention)
+- [4. Viewing Results](#4-viewing-results)
+  - [4.1 Pairwise Interaction Energy](#41-pairwise-interaction-energy)
+  - [4.2 Interaction Energy Matrix](#42-interaction-energy-matrix)
+  - [4.3 Protein Energy Network](#43-protein-energy-network)
+    - [4.3.1 Network Metrics](#431-network-metrics)
+    - [4.3.2 Shortest Path Analysis](#432-shortest-path-analysis)
+
+### Part II — gRINN Chatbot
 - [A. Introduction to the gRINN Chatbot](#a-introduction-to-the-grinn-chatbot)
   - [A.1 What It Is and Where It Fits](#a1-what-it-is-and-where-it-fits)
   - [A.2 Data Privacy Warning](#a2-data-privacy-warning)
@@ -44,9 +66,357 @@
 
 ---
 
+## Part I — Web Interface
+
+### 1. Submitting a Job
+
+i-gRINN Web Service is free to use and requires no account or login. Simply open the application in your browser and you can submit a job immediately.
+
+---
+
+#### 1.1 Choose Your Analysis Mode
+
+The Submit Job page is the entry point for all analyses. Two analysis modes are available depending on the type of data you have: **Trajectory Analysis** and **PDB Ensemble** mode. Select the mode that matches your input files using the **Analysis Mode** radio buttons at the top of the page.
+
+**Trajectory Analysis**
+
+Trajectory mode is designed for standard molecular dynamics simulations. It requires three input files that together describe your system's structure, dynamics, and bonded interactions.
+
+| File | Format | Description |
+|------|--------|-------------|
+| Structure | .pdb or .gro | Protein structure file |
+| Trajectory | .xtc or .trr (max 100 MB) | MD trajectory file |
+| Topology | .top | GROMACS topology file |
+
+> [!WARNING]
+> If your .top file uses `#include` directives for additional files, upload those files too — missing includes will cause job failures.
+
+If your simulation used a custom force field, you can upload the force field directory as a .zip archive. The .zip should contain the force field directory at its top level (e.g., `myff.ff/`), and the server will make it available to GROMACS during topology processing.
+
+> [!NOTE]
+> Atom numbers in your structure (.pdb/.gro) and topology files must match. Mismatches between the two are one of the most common causes of job failures.
+
+---
+
+**PDB Ensemble Mode**
+
+Ensemble mode accepts a single multi-model PDB file, such as an NMR ensemble or a set of docked poses. Topology is generated automatically using GROMACS `pdb2gmx`, so no topology file is required. When this mode is selected, a force field selector appears allowing you to choose the force field that `pdb2gmx` will use for topology generation.
+
+> [!WARNING]
+> Non-standard residues (small molecules, cofactors, modified amino acids) are not supported in Ensemble mode. The automatic topology generation via `pdb2gmx` can only handle standard protein residues.
+
+---
+
+#### 1.2 Upload Input Files
+
+> **Figure 1:** [SCREENSHOT: gRINN_Web_Fig1_Submit.png — The Submit Job page. Navigation bar at top; Analysis Mode radio buttons; file upload area with size-limit labels; Load Example Data button; GROMACS version dropdown.]
+
+Files can be added by dragging and dropping them onto the upload area, or by clicking inside the area to open a file browser. To get started quickly without your own data, click the **Load Trajectory Example Data** button to pre-load the Endolysin dataset — a small, fully configured trajectory job ready to submit immediately.
+
+| File Type | Limit |
+|-----------|-------|
+| Trajectory (.xtc/.trr) | 100 MB |
+| Structure / Topology | 10 MB |
+| Maximum frames/models | 200 |
+
+Once files are uploaded, they appear in a list below the upload area. The server automatically detects the purpose of each file (structure, trajectory, or topology) based on its extension and assigns it the appropriate role. If you upload two files of the same type — for example, two .pdb files — a dropdown will appear for that file slot so you can select which file should be used. To remove a file from the list, click the trash bin icon next to its entry.
+
+---
+
+#### 1.3 Advanced Parameters
+
+> **Figure 2:** [SCREENSHOT: gRINN_Web_Fig2_AdvancedParams.png — Advanced Parameters collapsible panel expanded, showing parameter inputs and the Submit Job button with public/private toggle below.]
+
+An **Advanced Parameters** collapsible panel is available below the file upload section. Expanding it is entirely optional — the default values are sensible for most jobs and you can submit without changing anything here. These parameters give you finer control over which frames are analyzed and which residue pairs are included.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Skip Frames | 1 | Analyze every N-th frame (1 = analyze all frames) |
+| Initial Pair Filter Cutoff (Å) | 12 | Maximum center-of-mass distance between residue pairs for inclusion in analysis |
+| Source Selection | — | ProDy atom selection syntax to define source residues, e.g. `protein and resid 1:100` |
+| Target Selection | — | ProDy atom selection syntax to define target residues, e.g. `protein and resid 101:200` |
+
+> [!WARNING]
+> Excluding large portions of the system via Source/Target selections will break downstream Protein Energy Network analyses — network weights for excluded residues will be missing. Use these selections only when you have a specific reason to restrict the analysis, and be aware of the downstream consequences.
+
+---
+
+#### 1.4 Submit the Job
+
+The **Submit Job** button becomes active only once all required files have been uploaded and validated by the server. If a required file is missing or a file fails validation, the button remains disabled and an error message indicates what needs to be corrected.
+
+Jobs are **private by default**, meaning they will not appear in the shared Job Queue visible to other users. If you would like your job to be visible to others — for example, to share progress with a collaborator — check the **Make job public (visible in Job Queue)** checkbox below the submit button before submitting.
+
+After the job is submitted, a confirmation banner appears on the page displaying the assigned Job ID and a direct link to the job monitoring page.
+
+> [!TIP]
+> Bookmark the monitoring URL immediately — it is the only way to return to a private job's results. Private jobs are not listed anywhere in the interface; the monitoring URL is the sole access point for your results.
+
+### 2. Monitoring Your Job
+
+After submitting a job, the browser automatically redirects to the **Job Detail** page for that job. You can return to this page at any time by bookmarking the URL — it remains accessible for as long as the job record exists.
+
+---
+
+#### 2.1 Progress Bar and Job Logs
+
+> **Figure 3:** [SCREENSHOT: gRINN_Web_Fig3_Monitor.png — Job Detail page shown in two states: left panel shows job running at ~25% progress; right panel shows the same job completed at 100% with Save Results and Launch Dashboard buttons visible.]
+
+The Job Detail page displays all the information you need to track your job from submission to completion. At the top, the **Job ID** is shown alongside the creation timestamp in Turkey Standard Time (UTC+3). A color-coded status badge reflects the current state of the job — **RUNNING**, **COMPLETED**, or **FAILED** — and updates automatically as the job progresses. Below the status information, the list of uploaded input files is shown for reference. The **progress bar** tracks overall pipeline advancement, and the **Job Logs** panel below it streams the live output of the running workflow.
+
+The progress bar advances most noticeably during the interaction energy calculation stage, which is the most computationally intensive part of the pipeline. Earlier stages complete quickly by comparison, so the bar may appear to stall briefly before accelerating through the final stages.
+
+**Workflow Stages**
+
+Each job progresses through seven sequential stages, reflected in the Job Logs panel:
+
+1. GROMACS environment setup
+2. Input validation
+3. Trajectory processing
+4. Initial pair filtering
+5. Interaction energy calculation
+6. Result generation
+7. PEN precomputation
+
+> [!NOTE]
+> Each job runs inside an isolated Docker container. The seven stages above reflect the full analysis pipeline; the progress bar advances as each stage completes.
+
+**On Completion**
+
+Once the job reaches **COMPLETED** status, two action buttons appear:
+
+| Button | Action |
+|--------|--------|
+| **Save Results** | Download all result files as a `.zip` archive |
+| **Launch Dashboard** | Open the interactive visualization dashboard for this job |
+
+---
+
+#### 2.2 Output Files Reference
+
+The result archive downloaded via **Save Results** contains the following files.
+
+**Energy Data Files**
+
+| File | Contents |
+|------|----------|
+| `average_interaction_energies.csv` | Time-averaged total, vdW, and electrostatic energies for each residue pair, including chain and residue metadata |
+| `energies_intEnTotal.csv` | Per-frame total (vdW + electrostatic) pairwise interaction energies in kcal/mol; wide format with rows as residue pairs and columns as trajectory frames |
+| `energies_intEnVdW.csv` | Per-frame van der Waals pairwise interaction energies (kcal/mol) |
+| `energies_intEnElec.csv` | Per-frame electrostatic pairwise interaction energies (kcal/mol) |
+| `energies_*.pickle` | Serialized Python dictionaries containing the raw energy data, intended for fast dashboard loading and direct programmatic access |
+
+**Network Data**
+
+The `pen_precomputed/` subdirectory contains precomputed Protein Energy Network (PEN) data used by the **Network Analysis** tab of the dashboard. It includes a `manifest.json` describing the PEN parameters, a `nodes.csv` with residue node mappings, per-frame centrality metric files (`metrics_*.csv`), and per-frame edge files (`edges_*.csv`) encoding network connectivity, weights, and distances.
+
+**Structure & Log Files**
+
+| File | Contents |
+|------|----------|
+| `system_dry.pdb` | Processed protein structure with solvent and ions removed, used as the reference structure throughout the analysis |
+| `topol_dry.top` | GROMACS topology file (either as provided or auto-generated from the input structure) |
+| `traj_dry.xtc` | Processed trajectory with any frame-skipping applied as specified at submission time |
+| `calc.log` | Full workflow log with timestamps and debug information covering all pipeline stages |
+| `gromacs.log` | GROMACS command output and messages generated during structure and trajectory processing |
+
+### 3. Job Queue
+
+The **Job Queue** page, accessible from the navigation bar at the top of every page, provides a live overview of all publicly visible jobs across all users of the service. It is the primary place to monitor ongoing analyses and to revisit completed results without knowing a specific Job ID in advance.
+
+---
+
+#### 3.1 Job Status Overview
+
+> **Figure 4:** [SCREENSHOT: gRINN_Web_Fig4_Queue.png — Job Queue page showing a table of jobs with status badges (RUNNING, COMPLETED, EXPIRED), Job IDs, creation times, and filter controls at the top.]
+
+The queue page displays all public jobs in a sortable table. At the top of the page, two filter controls let you narrow the list: a text input for matching a **Job ID** substring, and a dropdown to filter by **status**. The table refreshes automatically every 10 seconds, so status changes appear without requiring a manual page reload.
+
+Each row shows the Job ID (which doubles as a link to the monitoring page), the job's creation timestamp, and a coloured status badge. The possible statuses are:
+
+| Status | Meaning |
+|--------|---------|
+| **RUNNING** | Job is currently being processed by a worker |
+| **COMPLETED** | Job finished successfully — results and the interactive dashboard are available |
+| **EXPIRED** | Result files have been permanently deleted; the job record remains visible for reference |
+
+---
+
+#### 3.2 Private Jobs and Data Retention
+
+By default, all jobs submitted through i-gRINN Web are **private**. Private jobs do not appear in the Job Queue and are not visible to any other user browsing the service. If another user navigates directly to the monitoring URL of a private job, they will see only a placeholder entry labelled **"Private job"** with no further details exposed.
+
+Because private jobs are invisible in the queue, the only way to return to a private job later is through its **direct monitoring URL** — the unique link shown immediately after submission. You should bookmark this URL or save it securely as soon as the job is submitted; there is no account-based mechanism to recover it afterward.
+
+**Data Retention Policy**
+
+- Job result files are retained for **72 hours (3 days)** after the job completes.
+- After expiration, all result files are permanently deleted from the server. The job record continues to appear in the queue (status: **EXPIRED**) for a further **7 days**, after which the record itself is also removed.
+- All timestamps displayed throughout the service are in **Turkey Standard Time (UTC+3)**.
+
+> [!TIP]
+> Download your results before the 72-hour window closes. Once a job has expired, neither the result files nor the interactive dashboard are recoverable from the server.
+
+### 4. Viewing Results
+
+Click **Launch Dashboard** from the Job Detail page to open the interactive visualization interface. The dashboard has three tabs — **Pairwise Energies**, **Interaction Energy Matrix**, and **Network Analysis** — with a shared 3D Viewer and Frame Slider on the right side that stay synchronized across all tabs. Each tab presents a different lens on the same underlying interaction energy data: the Pairwise Energies tab lets you drill into any specific residue–residue pair over the full trajectory; the Interaction Energy Matrix gives you a bird's-eye heatmap of all pairwise averages at once; and the Network Analysis tab exposes residue centrality metrics derived from the Protein Energy Network. The sections below walk through the first two tabs in detail.
+
+---
+
+#### 4.1 Pairwise Interaction Energy
+
+> **Figure 5:** [SCREENSHOT: gRINN_Web_Fig5_PairwiseOverview.png — Pairwise Energies tab showing the full layout: residue selection lists on the left, three stacked time-series plots (Total, vdW, Electrostatic) in the center, and the 3D Viewer panel on the right.]
+
+> **Figure 6:** [SCREENSHOT: gRINN_Web_Fig6_PairwiseDetail.png — Pairwise Energies tab with a residue pair selected. Red diamond marker on the time-series plots indicates the current frame. The 3D Viewer shows the selected residues highlighted in green.]
+
+The **Pairwise Energies** tab is the primary tool for examining how two specific residues interact across the trajectory. Once you select a residue pair from the two scrollable lists on the left, the three stacked time-series plots in the center panel update immediately to show the Total, Van der Waals (vdW), and Electrostatic energy components frame by frame. The 3D Viewer on the right simultaneously highlights the selected pair so you can verify their spatial relationship in the structure.
+
+**Energy Components**
+
+| Component | Physical Meaning |
+|-----------|-----------------|
+| Van der Waals (vdW) | Lennard-Jones potential — short-range dispersion and steric effects |
+| Electrostatic | Coulombic interactions — long-range charge contributions |
+| Total | Sum of vdW + Electrostatic (kcal/mol) |
+
+> [!NOTE]
+> Negative values indicate attractive interactions; positive values indicate repulsive interactions.
+
+Residues are labeled using the convention `ResidueNameResidueNumber_ChainID`. For example, `GLY30_A` refers to Glycine at position 30 on chain A. This labeling matches the column headers in the raw CSV output files, making it straightforward to cross-reference dashboard selections with the underlying data.
+
+**Step 1:** Select a residue pair by clicking one residue in the left list and one in the right list. Both lists are searchable — type part of a residue name or number to filter the entries. The three time-series plots and the 3D Viewer update automatically as soon as both selections are made.
+
+**Step 2:** Inspect the three stacked time-series plots (Total / vdW / Electrostatic). The red diamond marker indicates the frame currently loaded in the 3D Viewer. As you read the plots, look for: consistently negative values throughout the trajectory (a stable, attractive interaction); large frame-to-frame fluctuations (a dynamic or transient contact); or a situation where one component dominates while the other stays near zero (for example, a purely electrostatic salt bridge, where the Electrostatic curve is strongly negative but the vdW curve is flat).
+
+**Step 3:** Explore the 3D Viewer on the right. The selected residue pair is highlighted in green against the rest of the protein structure, allowing you to visually confirm their proximity and orientation. Two sub-tabs are available beneath the viewer: **Structure Viewer** renders the molecular representation, while **Network Visualization** overlays the Protein Energy Network graph onto the structure. Use left-click and drag to rotate the structure, scroll the mouse wheel to zoom in or out, and middle-click and drag to pan.
+
+**Step 4:** Navigate through the trajectory using the **Frame Slider** below the 3D Viewer. Dragging the slider forward or backward moves through the trajectory one frame at a time: the 3D structure updates to reflect the atomic positions at the selected frame, and the red diamond on each of the three time-series plots moves synchronously so you can always see which frame you are inspecting.
+
+---
+
+#### 4.2 Interaction Energy Matrix
+
+> **Figure 7:** [SCREENSHOT: gRINN_Web_Fig7_Matrix.png — Interaction Energy Matrix tab showing the full heatmap with color scale bar. Blue cells indicate attractive interactions; red cells indicate repulsive interactions. The energy type radio buttons (Total / Elec / VdW) are visible above the heatmap.]
+
+The **Interaction Energy Matrix** tab provides a global overview of all pairwise average interaction energies as a color-coded heatmap, making it easy to identify energetic hotspots across the entire protein. Each cell in the matrix represents the average interaction energy between one residue pair over the selected trajectory frames: the row and column indices are residue labels, and the cell color encodes the sign and magnitude of that average energy according to the color scale shown alongside the heatmap.
+
+**Step 1:** Switch the energy type using the radio buttons above the heatmap: **Total** | **Elec** | **VdW**. The heatmap re-renders immediately to reflect your choice.
+
+| View | What it highlights |
+|------|-------------------|
+| Total | Combined picture — recommended starting point for an unbiased overview |
+| Elec | Long-range charge interactions; reveals salt bridges and polar contacts between charged or polar residues |
+| VdW | Short-range packing; highlights hydrophobic core contacts and close steric complementarity |
+
+**Step 2:** Interpret the color scale. The scale bar on the right edge of the heatmap maps colors to energy values in kcal/mol.
+
+| Color | Value | Meaning |
+|-------|-------|---------|
+| Deep blue | Strongly negative | Strong attractive interaction |
+| Light blue | Weakly negative | Mild attraction |
+| White | ≈ 0 | Negligible interaction |
+| Red | Positive | Repulsive interaction |
+
+**Step 3:** Interact with the heatmap to focus your analysis. Use the zoom and pan controls in the plot toolbar to enlarge a region of interest — for example, a stretch of the sequence known to contain an active site or binding interface. Click any cell in the heatmap to select that residue pair: the 3D Viewer immediately highlights both residues in green, and the **Pairwise Energies** tab updates its time-series plots for the selected pair so you can examine its full temporal behavior. The matrix title displays the current frame number and updates as you move the Frame Slider, letting you track how the energy landscape shifts across the trajectory.
+
+> [!TIP]
+> Off-diagonal clusters of deep blue cells are energetic hotspots — likely hydrophobic core contacts, salt bridges, or catalytic site interactions. Click a hotspot cell to select that pair, then switch to the **Pairwise Energies** tab to examine its time series in detail and assess whether the interaction is stable throughout the simulation or fluctuates between attractive and repulsive states.
+
+For LLM-assisted interpretation of these energies, see **Part II — gRINN Chatbot**.
+
+#### 4.3 Protein Energy Network
+
+A Protein Energy Network (PEN) represents the protein as a graph where residues are nodes and energetically significant interactions are edges. Edge weights are normalized average interaction energies (range [0, 1], attractive interactions favored). Edge distances equal 1 − weight, so shortest-path algorithms prefer stronger interactions — a shorter path distance corresponds to a more energetically favorable communication route through the network.
+
+> **Figure 8:** [SCREENSHOT: gRINN_Web_Fig8_Network.png — Network Analysis tab with the Metrics sub-tab selected. Controls panel on the left shows energy type selector, edge cutoff slider, covalent bonds toggle, and Update Network button. The main area shows metric visualization plots.]
+
+The controls panel on the left side of the Network Analysis tab governs how the PEN is constructed. The **Covalent Bonds** toggle determines whether backbone connectivity is included as edges alongside non-covalent interactions. The **Energy Type** selector switches the network between **Total** (combined electrostatic and van der Waals), **Elec** (electrostatic only), and **VdW** (van der Waals only) interaction energies. The **Edge Addition Energy Cutoff** slider sets the minimum interaction energy magnitude (in kcal/mol) that an edge must exceed to be included in the graph — raising this value produces a sparser, higher-confidence network. After adjusting any of these settings, click **Update Network** to recompute the graph before examining metrics or paths.
+
+> [!NOTE]
+> Click **Update Network** after changing the cutoff, energy type, or covalent bond setting to recompute the graph. Metric values and shortest paths displayed in the sub-tabs always reflect the most recently built network.
+
+---
+
+##### 4.3.1 Network Metrics
+
+The Metrics sub-tab computes and visualizes graph-theoretic properties of the PEN to identify functionally important residues. Each metric captures a different aspect of a residue's structural or communicative role within the network.
+
+**Step 1:** Select a network metric from the dropdown menu at the top of the Metrics sub-tab. Each metric highlights a different class of important residue.
+
+| Metric | Identifies |
+|--------|-----------|
+| Degree Centrality | Structural hubs — residues with the most connections |
+| Betweenness Centrality | Communication bridges — residues on the most shortest paths |
+| Closeness Centrality | Globally central residues for efficient information transfer |
+
+> [!TIP]
+> Start with Degree Centrality for an initial structural overview of the network's hub architecture. Switch to Betweenness Centrality to identify potential allosteric communication bridges — residues whose removal would most disrupt long-range signaling across the protein.
+
+**Step 2:** Choose a visualization type to determine how the metric values are displayed in the main panel.
+
+| Type | Best For |
+|------|----------|
+| Heatmap | Temporal analysis — how metric values change across trajectory frames |
+| Violin | Distribution insights — spread and median values across the trajectory |
+
+The **Heatmap** layout maps residues along one axis and trajectory frames along the other, making it straightforward to detect residues whose centrality fluctuates with conformational change. The **Violin** layout collapses the temporal dimension into a distribution summary, which is useful for identifying residues that consistently rank high across the entire trajectory.
+
+**Step 3:** Refine the residue display using the sorting, filtering, and range controls. Use the **Sort** dropdown to order residues by **Sequence Order**, **Ascending** metric value, or **Descending** metric value — select **Descending** to surface the highest-ranking residues at the top of the visualization. Use the **Filter Residues** autocomplete field to focus on a specific subset of residues by name or number. Use the **Min–Max range sliders** to narrow the display to a particular window of metric values or trajectory frames, reducing visual clutter when working with large systems.
+
+**Step 4:** Adjust the network threshold using the **Edge Addition Energy Cutoff** slider to control the stringency of edge inclusion, then click **Update Network** to rebuild the graph. The cutoff you choose directly affects which residues appear as hubs or bridges.
+
+| Edge Cutoff (kcal/mol) | Effect |
+|------------------------|--------|
+| Lower (e.g., 0.5) | Denser network — more edges included, revealing weaker but potentially relevant contacts |
+| Default (1.0) | Balanced — captures significant interactions without overloading the graph |
+| Higher (e.g., 3.0) | Sparse — only the strongest interactions retained, highlighting the network backbone |
+
+**Step 5:** Visualize the network in three dimensions by switching to the **3D Viewer** sub-tab and setting the display mode to **Network Visualization**. The PEN is overlaid directly on the protein structure, with edges rendered according to their weights. Use the **Frame Slider** to step through trajectory frames and observe how the network topology — edge presence, hub identity, and connectivity patterns — evolves across the simulation.
+
+---
+
+##### 4.3.2 Shortest Path Analysis
+
+This panel identifies the most efficient communication route between two selected residues through the PEN using Dijkstra's algorithm on edge distances (= 1 − weight). Because edge distances are inversely related to interaction strength, a shorter cumulative path distance indicates a more direct and energetically favorable communication channel between the two residues. This analysis is particularly valuable for mapping allosteric communication routes and identifying residues that relay signals between distant sites.
+
+**Step 1:** Configure the path settings using the controls panel before selecting residues. The choices made here determine which version of the network the path search runs on.
+
+| Setting | Option | Effect |
+|---------|--------|--------|
+| Covalent bonds | Enabled | Includes backbone connectivity — produces more continuous, physically connected paths |
+| Covalent bonds | Disabled | Only non-covalent interactions — highlights allosteric routes independent of sequence proximity |
+| Energy type | Total | Combined network — recommended starting point for an unbiased survey |
+| Energy type | Elec | Electrostatic-driven communication paths — relevant for charged or polar binding sites |
+| Energy type | VdW | Hydrophobic core / packing routes — useful for buried allosteric channels |
+
+**Step 2:** Select the source and target residues using the two autocomplete dropdowns labeled **Source Residue** and **Target Residue**. Type a residue name or number to filter the list and then click the desired entry. The source and target define the endpoints of the communication route; any residue in the system can serve as either endpoint.
+
+**Step 3:** Click **Find Shortest Paths**. The algorithm searches the PEN for the most energetically favorable routes between the source and target and presents the results in a ranked table. Candidate paths are ordered by total path length (distance), with the most favorable route listed first.
+
+| Column | Meaning |
+|--------|---------|
+| Path | Ordered list of residues forming the communication route from source to target |
+| Length (Distance) | Weighted path length — lower values indicate a more energetically favorable route |
+| Hops | Number of intermediate residue steps between the source and target |
+
+As a concrete example using the T4 lysozyme / endolysin example dataset, a representative shortest path might read: `MET1_A → ARG8_A → LEU15_A → ASP23_A → GLU31_A`. Each arrow represents a single edge — an energetically significant pairwise interaction — and the path as a whole defines a plausible allosteric communication channel through the protein.
+
+**Step 4:** Click any row in the path table to highlight that path in the 3D Viewer, rendering the participating residues and connecting edges directly on the protein structure. Use the **Frame Slider** to step through trajectory frames and check whether the highlighted path remains stable across the simulation, shifts to a different route at certain conformational states, or breaks entirely during specific structural transitions — all of which constitute direct, frame-level evidence of dynamic allostery.
+
+> [!TIP]
+> Frame-by-frame path analysis lets you directly correlate allosteric communication routes with specific conformational states captured in the MD trajectory. A path that appears only in a subset of frames may indicate an allosteric switch that is activated by a transient conformational event.
+
+For deeper biological interpretation of hub residues and communication paths identified here, proceed to **Part II — gRINN Chatbot**, beginning with Section D (Guided Walkthrough).
+
+---
+
+## Part II — gRINN Chatbot
+
 ## A. Introduction to the gRINN Chatbot
 
 ### A.1 What It Is and Where It Fits
+
+The gRINN Chatbot is accessible from within the results dashboard. If you have not yet submitted a job and launched the dashboard, see **Part I** of this tutorial first.
 
 The **gRINN Chatbot** is an AI assistant embedded directly in the gRINN Dashboard. It allows you to interrogate your **interaction energy** (IE) analysis results using plain English, without writing a single line of code. Instead of manually filtering DataFrames or constructing custom plots, you type a question and the chatbot generates, executes, and returns the answer — as text, a table, or a chart.
 
