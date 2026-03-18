@@ -686,12 +686,23 @@ blockquote:has(.admonition-tip) {
 }
 .admonition-label {
     display: block;
-    font-weight: 700;
-    font-size: 0.875em;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 6px;
+    font-size: 1.2em;
+    margin-bottom: 4px;
 }
 .admonition-warning { color: #7d5a00; }
 .admonition-note    { color: #1565c0; }
 .admonition-tip     { color: #2e7d32; }
+
+/* Tutorial / help page: constrain embedded screenshots */
+.help-markdown-content img,
+#tutorial-markdown-content img,
+#help-markdown-content img {
+    max-width: 75% !important;
+    width: auto !important;
+    height: auto !important;
+    display: block !important;
+    margin: 16px auto !important;
+    border-radius: 6px;
+    border: 1px solid rgba(90, 122, 96, 0.2);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}

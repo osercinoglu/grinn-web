@@ -15,11 +15,11 @@
   - [C.1 Global Settings](#c1-global-settings)
   - [C.2 Data Mode and Mode-Specific Controls](#c2-data-mode-and-mode-specific-controls)
   - [C.3 Session and Persistence Behaviour](#c3-session-and-persistence-behaviour)
-- [D. Your First Query — Basic Usage](#d-your-first-query--basic-usage)
+- [D. Guided Walkthrough: From Network Hubs to Biological Insight](#d-guided-walkthrough-from-network-hubs-to-biological-insight)
   - [D.1 Setup: Configuring the Chatbot for P00720](#d1-setup-configuring-the-chatbot-for-p00720)
-  - [D.2 Text Response Walkthrough](#d2-text-response-walkthrough)
-  - [D.3 Chart Response and Gallery](#d3-chart-response-and-gallery)
-  - [D.4 DataFrame/Table Response and Gallery](#d4-dataframetable-response-and-gallery)
+  - [D.2 First Prompt: Identify Network Hubs by Betweenness Centrality](#d2-first-prompt-identify-network-hubs-by-betweenness-centrality)
+  - [D.3 ✨ Explain Biologically — Connecting Hubs to Function](#d3--explain-biologically--connecting-hubs-to-function)
+  - [D.4 Follow-Up: Energy–Centrality Cross-Reference (Optional)](#d4-follow-up-energycentrality-cross-reference-optional)
 - [E. Analysis Examples by Data Mode](#e-analysis-examples-by-data-mode)
   - [E.1 Summary Mode — Global Statistical Overview](#e1-summary-mode--global-statistical-overview)
   - [E.2 Timeseries Mode — Temporal Evolution](#e2-timeseries-mode--temporal-evolution)
@@ -64,7 +64,9 @@ The chatbot supports two distinct query types:
 1. **Natural language queries** — you type a question in the chat input box and receive a text answer, a formatted table, or a Matplotlib chart embedded directly in the conversation.
 2. **"✨ Explain biologically" pipeline** — after any chatbot response, a `✨ Explain biologically` button appears. Clicking it sends a summary of the last result, along with any UniProt annotations and PubMed-retrieved literature context you have configured, to the LLM for a scientifically grounded biological interpretation.
 
-> **Figure A.1:** [SCREENSHOT: The gRINN Dashboard with the chatbot panel open on the right side. The panel header shows "💬 gRINN Chatbot" and the chat input box is visible at the bottom. The left panel shows the main analysis tabs. Annotate the toggle button in the dashboard header and the chatbot panel itself.]
+![Figure A.1 — The gRINN Dashboard with the chatbot panel open on the right. The toggle button in the header activates the panel; the chat input is at the bottom.](/assets/docs/gRINN_Chatbot_A1.png)
+
+*Figure A.1 — The gRINN Dashboard with the chatbot panel open.*
 
 ---
 
@@ -382,7 +384,24 @@ Settings that are persisted in the browser session (via Dash's `persistence_type
 
 ---
 
-## D. Your First Query — Basic Usage
+## D. Guided Walkthrough: From Network Hubs to Biological Insight
+
+> [!NOTE]
+> **About the expected outputs in this section.** The chatbot uses an LLM to generate and
+> execute Python/pandas code. LLM responses are inherently non-deterministic: the same prompt
+> can return different formats across runs. The walkthroughs below show outputs representative
+> of **Claude Sonnet 4** with the T4 lysozyme (P00720) example dataset. Your outputs will
+> differ in formatting and numerical values because your protein, simulation length, and
+> residue pair count are different. Prompts that explicitly state the desired output format
+> consistently yield more reproducible results.
+
+This walkthrough follows a three-step analytical arc that applies to any protein:
+
+1. **Identify network hubs** from PEN centrality metrics — dimensionless, robust, immediately biologically meaningful.
+2. **Explain biologically** — click one button to connect network position to UniProt annotations, mutagenesis data, and PubMed literature.
+3. **Cross-reference with interaction energies** (optional) — use IE data comparatively rather than relying on absolute magnitudes.
+
+---
 
 ### D.1 Setup: Configuring the Chatbot for P00720
 
@@ -396,89 +415,83 @@ Before sending your first query, spend two minutes wiring up the **gRINN Chatbot
 
 > `T4 lysozyme (P00720), a 164-residue bacteriophage enzyme. Catalytic residues: GLU11_A (catalytic glutamate), ASP10_A, ARG14_A. Known active site dynamics involve helix C (residues 39–50) and the hinge region.`
 
-This text is prepended to every query, giving the model the structural vocabulary it needs to interpret energy values in biological terms.
+This text is prepended to every query, giving the model the structural vocabulary it needs to interpret centrality values and energy data in biological terms.
 
-**Step 4.** In the **UniProt ID(s) by chain** field, enter `P00720` for Chain A. The chatbot will fetch the curated UniProt functional annotation and use it to enrich its answers with known active site and domain information.
+**Step 4.** In the **UniProt ID(s) by chain** field, enter `P00720` for Chain A. The chatbot will fetch the curated UniProt functional annotation and use it to enrich its answers with known active site and domain information. This is required for the `✨ Explain biologically` feature in D.3.
 
-**Step 5.** In the **DataFrames** multi-select dropdown, choose `IE_Total` and `IE_Electrostatic`. Select both because:
-- `IE_Total` provides the complete non-bonded picture (VdW + electrostatics) needed to rank pairs by overall interaction strength.
-- `IE_Electrostatic` is the dominant contributor in lysozyme's charged active site; having it as a separate DataFrame lets the model compute component fractions without needing to subtract.
+**Step 5.** In the **DataFrames** multi-select dropdown, choose `Metrics_Total_Cov_Cut1.0`. This DataFrame contains per-frame **PEN (Protein Energy Network) centrality metrics** — betweenness, closeness, and degree — for each residue, computed over the total interaction network with covalent bonds excluded and a 1.0 kcal/mol interaction cutoff. These dimensionless measures tell you which residues act as hubs or bottlenecks in the communication network of the protein.
 
-You may add `IE_VdW` as a third selection if you plan to ask about hydrophobic contacts specifically, but keeping the selection lean reduces token cost and speeds up responses.
-
-**Step 6.** Set **Data mode** to **Summary**. In Summary mode the chatbot receives a condensed representation — mean, standard deviation, minimum, and maximum per residue pair across the full frame range — rather than the raw 126-column timeseries. This is the right starting point: you want global statistics before drilling into dynamics.
+**Step 6.** Set **Data mode** to **Summary**. In Summary mode the chatbot receives a condensed representation — mean, standard deviation, minimum, and maximum per residue across the full frame range — rather than the raw timeseries. This is the right starting point for identifying consistent network hubs.
 
 **Step 7.** Click `⚙️ Settings ▼` again to collapse the settings panel and reclaim vertical space for the chat history.
 
-> **Figure D.1:** [SCREENSHOT: Settings panel fully configured — Protein context filled in, UniProt ID "P00720" entered for Chain A, DataFrames showing "IE_Total" and "IE_Electrostatic" selected, Data mode radio button on "Summary".]
+![Figure D.1 — Settings panel fully configured: Protein context filled in, UniProt ID "P00720" for Chain A, "Metrics_Total_Cov_Cut1.0" selected, Data mode set to Summary.](/assets/docs/gRINN_Chatbot_D1.png)
+
+*Figure D.1 — Settings panel configured for the T4 lysozyme walkthrough.*
 
 ---
 
-### D.2 Text Response Walkthrough
+### D.2 First Prompt: Identify Network Hubs by Betweenness Centrality
 
-With the settings configured, type your first query into the message box and press Enter or click **Send**:
+With the settings configured, type the following query into the message box and press Enter or click **Send**:
 
-`"Which 10 residue pairs have the strongest average attractive interaction? Include their electrostatic and VdW components."`
+`"Which residues have the highest average betweenness centrality? Show the top 10 sorted by average betweenness descending. Include columns for average closeness and average degree."`
 
-The model translates this into a pandas query that sorts the Summary DataFrame by mean interaction energy in ascending order and returns the top ten rows. Expect a response within a few seconds.
+The model queries the Summary DataFrame and returns a table ranked by mean betweenness centrality. Expect a response within a few seconds.
 
-**Reading the response.** The answer typically arrives as a numbered list or a Markdown table with columns for pair name, mean total energy, mean electrostatic energy, and mean VdW energy. When reading it, keep in mind:
+**Reading the response.** The answer should arrive as a Markdown table with columns for residue name, average betweenness, average closeness, and average degree. When interpreting it:
 
-- **Total energy = Electrostatic + VdW** (plus any small cross-terms). If the electrostatic value nearly equals the total, the interaction is a salt bridge or hydrogen bond; if VdW accounts for more than ~30 % of the total, the contact has a significant hydrophobic or steric component.
-- `GLU5_A`–`ARG8_A` should appear at the top of the list with a mean total energy of −204.7 kcal/mol, of which −208.6 kcal/mol is electrostatic and +3.9 kcal/mol is VdW. The slightly repulsive VdW term is normal for charged pairs that are close enough for their electron clouds to overlap.
-- `ILE3_A`–`ARG96_A` at −186.4 kcal/mol (−189.0 kcal/mol electrostatic, +2.6 kcal/mol VdW) and `ASN2_A`–`ARG8_A` at −168.9 kcal/mol (−174.6 kcal/mol electrostatic) should follow.
-- Verify the numbers the model returns against the raw `average_interaction_energies.csv` table visible in the **Pairwise Energies** tab. If a value differs by more than 0.1 kcal/mol, the model may have applied a filter or stride that excluded some rows — check the stride value it reports in its response preamble.
+- **Betweenness centrality** measures how often a residue lies on the shortest communication path between other residue pairs. A high betweenness residue is an "information bottleneck" — if it were mutated or displaced, many communication pathways in the network would be disrupted. These are prime candidates for allosteric or catalytic importance.
+- **Closeness centrality** measures how quickly a residue can reach all others in the network. High closeness residues are globally well-connected; they propagate conformational signals efficiently to the rest of the protein.
+- **Degree** is the number of direct interaction partners above the cutoff. High-degree residues are local hubs with many contacts.
 
-> [!NOTE]
-> The model may add a sentence of structural interpretation, such as "GLU5_A–ARG8_A is a strong salt bridge at the N-terminus, consistent with its role in stabilizing the helix dipole." Treat this as a hypothesis to investigate, not a citable fact. Always cross-reference with the PDB structure in the Mol* viewer.
-
-> **Figure D.2:** [SCREENSHOT: Chatbot response showing a numbered list or table of top 10 residue pairs with total, electrostatic, and VdW energy columns; GLU5_A–ARG8_A appears as the first row at −204.7 kcal/mol.]
-
----
-
-### D.3 Chart Response and Gallery
-
-To request a visualization, send:
-
-`"Plot a bar chart of the top 20 residue pairs by average total interaction energy."`
-
-The chatbot executes a two-step process: first it generates Python code using `matplotlib` or `plotly`, then runs it inside the **Docker sandbox** environment. The resulting image is embedded directly below the model's response text in the chat panel.
-
-**What to expect:**
-- A horizontal or vertical bar chart with one bar per residue pair. The pairs are labeled along one axis (e.g., `GLU5_A-ARG8_A`) and energy values in kcal/mol on the other.
-- The chart appears inline in the chat thread. Click it to enlarge it to full-screen.
-- Each chart you generate is also added to the **chart gallery** buttons at the top of the chat panel (numbered `📊 1`, `📊 2`, etc.). Click any numbered button to bring a previous chart back into view without scrolling up through the conversation.
+In the T4 lysozyme (P00720) example dataset, the top-betweenness residues include **ASP10_A**, **ILE3_A**, and **ARG8_A** — residues at or near the active site and the N-terminal helix. Your values will differ depending on your protein. The key question to ask is: do the top-betweenness residues correspond to known functional, active-site, or allosteric positions in your protein?
 
 > [!TIP]
-> For publication-quality output, refine the prompt: `"Plot a horizontal bar chart of the top 20 residue pairs by average total interaction energy, sorted most-attractive first, with x-axis labels rotated 45 degrees and a horizontal dashed line at −50 kcal/mol."` The model respects matplotlib styling instructions reliably when they are spelled out explicitly.
+> Follow up with: `"Plot a horizontal bar chart of the top 20 residues by average betweenness centrality."` The resulting chart gives an at-a-glance view of the betweenness distribution — whether hubs are sharply defined or whether centrality is spread broadly across many residues tells you about the structural communication topology of your protein.
 
-> **Figure D.3:** [SCREENSHOT: Bar chart of top 20 residue pairs embedded in the chat panel; GLU5_A-ARG8_A bar extends furthest in the attractive (negative) direction; chart gallery buttons "📊 1" visible above the chat input box.]
+![Figure D.2 — Chatbot response showing the top 10 residues by average betweenness centrality, with columns for average closeness and degree. ASP10_A appears near the top for T4 lysozyme.](/assets/docs/gRINN_Chatbot_D2.png)
+
+*Figure D.2 — Top-10 betweenness centrality table returned by the chatbot.*
 
 ---
 
-### D.4 DataFrame/Table Response and Gallery
+### D.3 ✨ Explain Biologically — Connecting Hubs to Function
 
-For focused tabular output, send:
+After receiving the hub table from D.2, click the **`✨ Explain biologically`** button that appears below the chatbot response. This triggers a two-stage automated pipeline (described in full in [Section F](#f-biological-interpretation-feature)):
 
-`"Show me all pairs involving GLU11_A with their average total and electrostatic energies."`
+1. **UniProt lookup:** The dashboard fetches the UniProt entry for P00720 and extracts curated functional features — active site annotations, MUTAGEN entries, binding sites, and domain regions.
+2. **Literature synthesis:** Relevant PubMed abstracts are fetched and the LLM synthesises a mechanistic hypothesis paragraph connecting the residues it identified from your data to their known biology.
 
-In Summary mode, the model filters the DataFrame to rows where either residue identifier contains `GLU11_A` and returns the results as a Markdown table. From the actual data, `GLU11_A`'s significant attractive partners include:
+**What the output looks like.** For T4 lysozyme with ASP10_A at the top of the betweenness ranking, the output will note:
 
-| Pair | Avg Total (kcal/mol) | Avg Electrostatic (kcal/mol) | Avg VdW (kcal/mol) |
-|---|---|---|---|
-| GLU11_A – GLY12_A | −57.1 | −56.5 | −0.6 |
-| GLU11_A – ARG14_A | −49.6 | −51.5 | +1.9 |
-| GLU11_A – ARG148_A | −8.0 | −7.9 | −0.1 |
-| GLU11_A – ILE29_A | −2.2 | −0.1 | −2.1 |
+- UniProt annotates **ASP10** (equivalent to ASP10_A in the simulation naming) as part of the catalytic mechanism, with MUTAGEN entries demonstrating that Asp→Asn substitution abolishes enzymatic activity.
+- **GLU11**, the catalytic glutamate, is a direct network neighbour of ASP10_A with high betweenness in its own right — consistent with their cooperative role in substrate cleavage.
+- PubMed references to T4 lysozyme mutagenesis studies appear as inline citations with PMIDs, so you can follow up in the primary literature.
 
-The `GLU11_A`–`GLY12_A` interaction reflects the backbone peptide bond (backbone charges dominate), while `GLU11_A`–`ARG14_A` at −49.6 kcal/mol is the strongest true side-chain interaction at the active site and is almost entirely electrostatic.
+The key message is: **the network identified ASP10_A as a communication hub; UniProt independently confirms it is catalytic; mutagenesis data shows it is essential — the chatbot connected these dots automatically from your simulation data.**
 
-**Reading tables in the chat panel:**
-- Tables render as Markdown inside the chat bubble. Rows are scrollable if the result is large.
-- Like charts, tables are part of the persistent chat history; scroll up to revisit earlier results.
-- If the table exceeds approximately 30 rows, the model may truncate it and note the total row count. Narrow the query (e.g., add `"with total energy below −5 kcal/mol"`) to stay within display limits.
+> [!NOTE]
+> The `✨ Explain biologically` button is most powerful when the UniProt ID is configured in the settings (Step 4 above) and the chatbot has already produced a response identifying specific residues. It uses whatever residues appeared in the last chatbot response as the focus of the annotation query. If the button is greyed out, check that a UniProt ID has been entered and that the last response contains residue names in the expected format (e.g., `ASP10_A`).
 
-> **Figure D.4:** [SCREENSHOT: Chatbot response showing a Markdown table of GLU11_A interaction partners with three energy columns; the chat history shows the earlier bar chart still visible above.]
+![Figure D.3 — The ✨ Explain biologically output: a mechanistic interpretation paragraph citing Asp10 active-site annotation from UniProt, a MUTAGEN entry table, and PubMed references.](/assets/docs/gRINN_Chatbot_D3.png)
+
+*Figure D.3 — Biological interpretation generated from the hub table in Figure D.2.*
+
+---
+
+### D.4 Follow-Up: Energy–Centrality Cross-Reference (Optional)
+
+To connect the network topology picture to pairwise energetics, go back to **Settings**, add `IE_Total` to the DataFrame selection (keeping `Metrics_Total_Cov_Cut1.0` selected as well), and send:
+
+`"For each of the top 10 highest-betweenness residues, show their average total interaction energy summed over all partners. Which network hubs are also the most energetically coupled to the rest of the protein? Return a markdown table with columns: Residue, Avg Betweenness, Sum of Avg IE_Total over all partners (kcal/mol), sorted by Avg Betweenness descending."`
+
+This query asks the model to join two DataFrames — centrality metrics and pairwise energies — and present a combined picture. Residues that rank highly on **both** betweenness and summed IE are doubly significant: they are structural communication bottlenecks and they also hold the protein together energetically.
+
+> [!NOTE]
+> **On interpreting IE values in this context.** Here the IE data is used for **relative ranking within your dataset** — which hub residues are more energetically coupled than others — rather than as absolute thermodynamic quantities. This is the appropriate use of force-field pairwise energies; see [Section E.1](#e1-summary-mode--global-statistical-overview) for a fuller note on IE magnitude interpretation.
+
+> **Figure D.4:** [SCREENSHOT: Chatbot response showing a combined table with betweenness centrality and summed IE columns for the top 10 hub residues; ASP10_A and ILE3_A appear in the top rows of both rankings in the T4 lysozyme example.]
 
 ---
 
@@ -494,30 +507,37 @@ The three **data modes** — **Summary**, **Timeseries**, and **Snapshot** — d
 
 Make sure **Data mode** is set to **Summary** in the settings panel before sending these queries.
 
----
-
-**Prompt 1:** `"Which residue pairs have a standard deviation greater than 10 kcal/mol in total interaction energy? This indicates dynamic interactions."`
-
-The model scans the `std_ie` column and returns pairs whose standard deviation exceeds 10 kcal/mol. These are interactions that fluctuate dramatically across the 126-frame trajectory — candidates for conformational flexibility analysis, transient contacts, or allosteric switching. A high standard deviation relative to the mean (coefficient of variation > ~0.5) suggests the interaction forms and breaks repeatedly during the simulation rather than holding a stable geometry. Compare the residues returned here against those in the active site region (`GLU11_A`, `ASP10_A`, `ARG14_A`) to assess whether catalytic contacts are rigid or dynamic.
+> [!NOTE]
+> **On IE magnitudes.** Pairwise interaction energies from MD force-field decomposition can reach large absolute values (±50–200 kcal/mol) for charged residue pairs, because they include Coulombic interactions without long-range correction. These values are intended for **relative ranking within your dataset** — comparing pairs to each other — not as absolute thermodynamic quantities. VdW contributions (`mean_vdw`) are generally more physically reliable in absolute terms. When in doubt, normalise or rank rather than interpret raw magnitudes.
 
 ---
 
-**Prompt 2:** `"Compare the electrostatic and VdW contributions for the top 20 pairs. Which interactions are purely electrostatic vs. mixed?"`
+**Prompt 1:** `"Which residue pairs have a standard deviation greater than 10 kcal/mol in total interaction energy? Return a markdown table with columns: Pair, Mean Total (kcal/mol), Std Total (kcal/mol), sorted by Std Total descending."`
 
-The model joins the `IE_Total` and `IE_Electrostatic` summary DataFrames, computes the electrostatic fraction (electrostatic / total), and groups pairs into categories. Expect the output to reveal:
+The model scans the `std_ie` column and returns pairs whose standard deviation exceeds 10 kcal/mol. These are interactions that fluctuate dramatically across the 126-frame trajectory — candidates for conformational flexibility analysis, transient contacts, or allosteric switching. A high standard deviation relative to the mean (coefficient of variation > ~0.5) suggests the interaction forms and breaks repeatedly during the simulation rather than holding a stable geometry. Compare the residues returned here against your known active site or functional residues to assess whether catalytic contacts are rigid or dynamic. (In the T4 lysozyme example, `GLU11_A`, `ASP10_A`, and `ARG14_A` are the relevant references.)
 
-- **Purely electrostatic (>95 % electrostatic fraction):** `GLU5_A`–`ARG8_A` (−208.6 kcal/mol electrostatic out of −204.7 kcal/mol total), `ASN2_A`–`ARG8_A`, `ILE3_A`–`ARG96_A`. These are salt bridges or strong hydrogen bond networks between charged residues.
-- **Mixed contacts:** pairs such as `ILE3_A`–`PHE4_A` (−58.5 kcal/mol total, −56.0 kcal/mol electrostatic, −2.5 kcal/mol VdW) are primarily electrostatic but with a measurable VdW component from close packing.
-- **VdW-dominated:** hydrophobic core contacts involving aliphatic side chains will show near-zero electrostatic contributions and small but consistent negative VdW values (typically −1 to −5 kcal/mol).
+---
+
+**Advanced: Component Energy Analysis**
+
+The following examples require `IE_Total` and `IE_Electrostatic` in the DataFrame selection. They are most useful once you have already identified residues of interest via centrality (Section D) or a basic IE ranking query. Add both DataFrames in the Settings panel before sending these prompts.
+
+**Prompt 2:** `"Using IE_Total and IE_Electrostatic, for the top 20 pairs by mean total IE: compute mean electrostatic energy, derive mean VdW as mean_total minus mean_electrostatic, and compute the electrostatic fraction as mean_electrostatic / mean_total. Return a markdown table with columns: Pair, Mean Total (kcal/mol), Mean Electrostatic (kcal/mol), Mean VdW (kcal/mol, derived), Electrostatic Fraction. Which interactions are purely electrostatic (fraction > 0.95) vs. mixed?"`
+
+The model derives the VdW component from the two loaded DataFrames (Total − Electrostatic), computes the electrostatic fraction, and groups pairs into categories. The categories described below are general patterns to look for; the specific pairs will depend on your protein. In the T4 lysozyme (P00720) example dataset, the output reveals:
+
+- **Purely electrostatic (>95 % electrostatic fraction):** In the T4 lysozyme example, `GLU5_A`–`ARG8_A` (−208.6 kcal/mol electrostatic out of −204.7 kcal/mol total), `ASN2_A`–`ARG8_A`, `ILE3_A`–`ARG96_A`. These are salt bridges or strong hydrogen bond networks between charged residues. Your equivalent pairs will be protein-specific.
+- **Mixed contacts:** In the T4 lysozyme example, pairs such as `ILE3_A`–`PHE4_A` (−58.5 kcal/mol total, −56.0 kcal/mol electrostatic, −2.5 kcal/mol derived VdW) are primarily electrostatic but with a measurable VdW component from close packing.
+- **VdW-dominated:** hydrophobic core contacts involving aliphatic side chains will show near-zero electrostatic contributions and small but consistent negative derived VdW values (typically −1 to −5 kcal/mol).
 
 > [!TIP]
 > Follow up with: `"List pairs where the VdW contribution is more negative than −2 kcal/mol and the electrostatic contribution is between −5 and +5 kcal/mol."` This isolates genuinely hydrophobic contacts for core-packing analysis.
 
 ---
 
-**Prompt 3:** `"Map the interaction network of GLU11_A: which residues interact with it and with what average energy?"`
+**Prompt 3:** `"Map the interaction network of GLU11_A: which residues interact with it and with what average total energy? Return a markdown table with columns: Partner, Avg Total (kcal/mol). Sort by Avg Total ascending. Adjust the residue name to match your protein."`
 
-This prompt asks for the complete first-shell interaction neighborhood of the **catalytic glutamate**. From the verified dataset, the model should return a table that includes at minimum:
+This prompt asks for the complete first-shell interaction neighborhood of the **catalytic glutamate**. In the T4 lysozyme (P00720) example dataset (your values will differ), the model returns a table that includes at minimum the following:
 
 | Partner | Avg Total (kcal/mol) | Character |
 |---|---|---|
@@ -528,10 +548,10 @@ This prompt asks for the complete first-shell interaction neighborhood of the **
 | PHE104_A | −0.5 | Weak |
 | PHE4_A | +60.8 | Repulsive (same helix, close proximity) |
 
-The strongly repulsive `GLU11_A`–`PHE4_A` value (+60.8 kcal/mol) is a useful reminder that gRINN reports all pairwise energies, including repulsive ones; these are often backbone-adjacent residues at close sequence positions whose side chains are geometrically forced into proximity without forming a favorable contact. The large positive electrostatic component (+55.0 kcal/mol) reflects charge–charge repulsion or unfavorable dipole alignment.
+The strongly repulsive `GLU11_A`–`PHE4_A` value (in T4 lysozyme, +60.8 kcal/mol) is a useful reminder that gRINN reports all pairwise energies, including repulsive ones; these are often backbone-adjacent residues at close sequence positions whose side chains are geometrically forced into proximity without forming a favorable contact. The large positive electrostatic component (+55.0 kcal/mol) reflects charge–charge repulsion or unfavorable dipole alignment.
 
 > [!NOTE]
-> GLY12_A is the peptide-bond neighbor of GLU11_A in sequence. The very large attractive electrostatic value (−56.5 kcal/mol) reflects partial atomic charges along the backbone rather than a side-chain interaction. If you want only side-chain contacts, ask the model to exclude pairs where the residues are within one position of each other in sequence, or use the PEN **cov0** (covalent bonds excluded) network as a reference.
+> GLY12_A is the peptide-bond neighbor of GLU11_A in sequence. In the T4 lysozyme example, the very large attractive electrostatic value (−56.5 kcal/mol) reflects partial atomic charges along the backbone rather than a side-chain interaction. If you want only side-chain contacts, ask the model to exclude pairs where the residues are within one position of each other in sequence, or use the PEN **cov0** (covalent bonds excluded) network as a reference.
 
 ---
 
@@ -544,26 +564,26 @@ Switch **Data mode** to **Timeseries** in the settings panel. In this mode the m
 
 ---
 
-**Prompt 1:** `"Plot the interaction energy between GLU11_A and ARG14_A over all frames. Does it fluctuate significantly?"`
+**Prompt 1:** `"Plot the interaction energy between GLU11_A and ARG14_A over all frames as a line plot, with frame number on the x-axis and interaction energy (kcal/mol) on the y-axis. Add a horizontal dashed line at the mean. Does it fluctuate significantly? Adjust residue names to match your protein."`
 
-With the residue filter active, the model has access to the complete 126-frame timeseries for the `GLU11_A`–`ARG14_A` pair. The expected response is a line plot with frames on the x-axis and interaction energy (kcal/mol) on the y-axis. The mean of approximately −49.6 kcal/mol is a strong attractive signal, but the standard deviation and visual scatter of the line will tell you whether this contact is a stable hydrogen bond or a fluctuating interaction. Stable active-site contacts in well-folded proteins typically show a coefficient of variation below ~0.2; larger fluctuations warrant follow-up with Snapshot mode to identify the specific conformational states responsible.
+With the residue filter active, the model has access to the complete 126-frame timeseries for the `GLU11_A`–`ARG14_A` pair. The expected response is a line plot with frames on the x-axis and interaction energy (kcal/mol) on the y-axis. In the T4 lysozyme example, the mean is approximately −49.6 kcal/mol; in your dataset the mean will reflect your own protein. The standard deviation and visual scatter of the line will tell you whether this contact is a stable hydrogen bond or a fluctuating interaction. Stable active-site contacts in well-folded proteins typically show a coefficient of variation below ~0.2; larger fluctuations warrant follow-up with Snapshot mode to identify the specific conformational states responsible.
 
-> **Figure E.1:** [SCREENSHOT: Line plot of GLU11_A–ARG14_A interaction energy across frames 0–125; y-axis in kcal/mol; mean energy line at approximately −49.6 kcal/mol shown as a dashed overlay.]
+> **Figure E.1:** [SCREENSHOT: T4 lysozyme example; line plot of GLU11_A–ARG14_A interaction energy across frames 0–125; y-axis in kcal/mol; mean energy line at approximately −49.6 kcal/mol shown as a dashed overlay. Your plot will display your own residue pair names and energy values.]
 
 ---
 
-**Prompt 2:** `"Identify any frames where the GLU5_A–ARG8_A interaction energy deviates more than 2 standard deviations from the mean. List the frame numbers."`
+**Prompt 2:** `"For the GLU5_A–ARG8_A pair, identify any frames where the interaction energy deviates more than 2 standard deviations from its mean. Return a markdown table with columns: Frame, Energy (kcal/mol), Z-score. Adjust the residue name to match your protein."`
 
-The model computes the mean (−204.7 kcal/mol) and standard deviation of the `GLU5_A`–`ARG8_A` timeseries, then applies a z-score filter (`|z| > 2`) to identify outlier frames. The response will list frame numbers where this salt bridge is either anomalously strengthened or weakened. These frames are valuable starting conformations for:
+The model computes the mean and standard deviation of the `GLU5_A`–`ARG8_A` timeseries (in the T4 lysozyme example, the mean for `GLU5_A`–`ARG8_A` is approximately −204.7 kcal/mol, but your value will differ), then applies a z-score filter (`|z| > 2`) to identify outlier frames. The response will list frame numbers where this salt bridge is either anomalously strengthened or weakened. These frames are valuable starting conformations for:
 - Targeted MD simulations or energy minimizations examining salt bridge geometry.
 - Structural snapshots for comparative visualization in the Mol* viewer using the frame slider.
 - Input to follow-up Snapshot mode queries (see Section E.3).
 
 ---
 
-**Prompt 3:** `"Is there any correlation between the GLU11_A–ARG14_A and ASP10_A–ARG14_A energies over time?"`
+**Prompt 3:** `"Compute the Pearson correlation coefficient between the GLU11_A–ARG14_A and ASP10_A–ARG14_A interaction energy timeseries. Report the correlation value and its interpretation. Optionally plot both timeseries on a shared frame axis. Adjust residue names to match your protein."`
 
-This query asks the model to compute a **Pearson correlation coefficient** between two timeseries. The response may include a numeric correlation value, a dual line plot showing both timeseries on a shared frame axis, or a scatter plot of one against the other. `ASP10_A`–`ARG148_A` has an average energy of −64.3 kcal/mol, making `ARG148_A` a major electrostatic hub in the C-terminal domain; the analogous query for `ASP10_A`–`ARG14_A` (−2.1 kcal/mol, much weaker) tests whether active-site interactions are coordinated. A positive correlation between `GLU11_A`–`ARG14_A` and `ASP10_A`–`ARG14_A` would indicate that `ARG14_A` moves as a coherent unit with respect to both its neighbors — a signature of correlated active-site dynamics.
+This query asks the model to compute a **Pearson correlation coefficient** between two timeseries. The response may include a numeric correlation value, a dual line plot showing both timeseries on a shared frame axis, or a scatter plot of one against the other. In the T4 lysozyme example, `ASP10_A`–`ARG148_A` has an average energy of −64.3 kcal/mol, making `ARG148_A` a major electrostatic hub in the C-terminal domain; in the T4 lysozyme example, the analogous query for `ASP10_A`–`ARG14_A` (−2.1 kcal/mol, much weaker) tests whether active-site interactions are coordinated. Your own values will differ and should guide which pairs you select for correlation analysis. A positive correlation between `GLU11_A`–`ARG14_A` and `ASP10_A`–`ARG14_A` would indicate that `ARG14_A` moves as a coherent unit with respect to both its neighbors — a signature of correlated active-site dynamics.
 
 > [!NOTE]
 > Always check the stride value the model reports at the beginning of its Timeseries response. A line such as "Using stride 3 (frames 0, 3, 6, …, 123)" tells you how many actual data points underlie the plot. With the residue filter applied to only a handful of residues, stride should be 1 and all 126 frames will be used.
@@ -578,7 +598,7 @@ Snapshot mode is best for questions of the form "what does the interaction patte
 
 ---
 
-**Prompt 1 (frame 0):** `"In frame 0, which residues have the strongest interaction with ARG8_A?"`
+**Prompt 1 (frame 0):** `"In the current snapshot (frame 0), which residues have the strongest interaction with ARG8_A? Return a markdown table with columns: Partner, Total IE (kcal/mol), sorted by Total IE ascending. Adjust the residue name to match your protein."`
 
 Frame 0 is the initial conformation of the simulation. Set the **Frame #** number to `0` in the snapshot settings, then send the query. The model returns a table of `ARG8_A`'s interaction partners sorted by total energy at that frame. Compare the returned rankings to the Summary mode averages: if the same pairs (`GLU5_A`, `ASN2_A`, `ILE3_A`, `MET1_A`) dominate in both views, the interaction pattern is structurally invariant over the trajectory. If a partner appears strongly only at frame 0, it may reflect a conformation present at the start of the simulation that relaxes as the protein equilibrates.
 
@@ -588,14 +608,14 @@ Frame 0 is the initial conformation of the simulation. Set the **Frame #** numbe
 
 **Prompt 2:** `"Compare the interaction energy pattern around GLU11_A in frame 0 vs. frame 63 vs. frame 125 (run three separate queries in snapshot mode)."`
 
-Run this as three sequential queries, changing the **Frame #** number box to `0`, `63`, and `125` between each submission. Ask the same question each time: `"Show all interactions of GLU11_A with their total and electrostatic energies in the current snapshot."` By reading the three response tables in sequence you can construct a narrative of how the active site evolves: does `GLU11_A`–`ARG14_A` strengthen or weaken from the start to the midpoint to the end of the trajectory? Does any new interaction partner appear at frame 63 that is absent at frame 0?
+Run this as three sequential queries, changing the **Frame #** number box to `0`, `63`, and `125` between each submission. Ask the same question each time: `"Show all interactions of GLU11_A with their total and electrostatic energies in the current snapshot. Return a markdown table with columns: Partner, Total IE (kcal/mol), Electrostatic IE (kcal/mol), sorted by Total IE ascending."` (Adjust residue name to match your protein.) By reading the three response tables in sequence you can construct a narrative of how the active site evolves: does `GLU11_A`–`ARG14_A` strengthen or weaken from the start to the midpoint to the end of the trajectory? Does any new interaction partner appear at frame 63 that is absent at frame 0?
 
 > [!TIP]
 > Copy the three response tables into a spreadsheet or ask a final Summary-mode follow-up: `"Summarize how the GLU11_A interaction pattern changed across frames 0, 63, and 125 based on the data I provided above."` The model will synthesize the three snapshots into a textual narrative.
 
 ---
 
-**Prompt 3:** `"In the current snapshot, identify all pairs with interaction energy below −50 kcal/mol. Group them by secondary structure type if possible (helix-helix, helix-loop, etc.)."`
+**Prompt 3:** `"In the current snapshot, identify all pairs with interaction energy below −50 kcal/mol. Group them by secondary structure type if possible (helix-helix, helix-loop, etc.). Return a markdown table with columns: Pair, Total IE (kcal/mol), Inferred Secondary Structure. The energy threshold and secondary structure categories can be adjusted to suit your protein."`
 
 This prompt combines quantitative filtering with structural classification. The model will apply the energy threshold filter and then attempt to assign secondary structure categories using residue numbering and the protein context you provided in the settings (helix C: residues 39–50, hinge region). For secondary structure categories it cannot infer from context alone, it will indicate that assignment is uncertain and suggest consulting the Mol* structure viewer.
 
@@ -613,20 +633,26 @@ The table below provides ready-to-use prompts for twelve common structural biolo
 | Analytical Goal | Recommended Mode | Example Prompt |
 |---|---|---|
 | Find strongest average interactions | Summary | `"List the 10 residue pairs with the most attractive average total IE."` |
-| Identify salt bridges | Summary | `"Which pairs have average electrostatic IE below −50 kcal/mol and VdW near zero?"` |
+| Identify salt bridges | Summary | `"Which pairs have average electrostatic IE below −50 kcal/mol? Among those, which have a derived VdW contribution (mean_total minus mean_electrostatic) close to zero, indicating a pure electrostatic interaction? Return a markdown table with columns: Pair, Mean Electrostatic (kcal/mol), Derived Mean VdW (kcal/mol)."` |
 | Map active site network | Summary | `"Show all interactions of GLU11_A, ARG14_A, and ASP10_A with their average energies."` |
 | Find dynamic/flexible pairs | Summary | `"Which pairs have std > 10 kcal/mol in total IE? List them sorted by std descending."` |
-| Compare energy component fractions | Summary | `"For the top 20 pairs, compute the electrostatic fraction of total IE and rank by it."` |
+| Compare energy component fractions | Summary | `"For the top 20 pairs by mean total IE, compute: mean electrostatic IE from IE_Electrostatic, derived mean VdW as mean_total minus mean_electrostatic, and the electrostatic fraction as mean_electrostatic / mean_total. Return a markdown table with columns: Pair, Mean Total (kcal/mol), Mean Electrostatic (kcal/mol), Derived Mean VdW (kcal/mol), Electrostatic Fraction. Rank by electrostatic fraction descending."` |
 | Temporal fluctuation analysis | Timeseries | `"Plot IE between GLU5_A and ARG8_A over all frames. Mark the mean as a dashed line."` |
 | Detect transient interactions | Timeseries | `"Which pairs appear below −30 kcal/mol for fewer than 20 % of frames?"` |
 | Correlated motion | Timeseries | `"Compute the pairwise Pearson correlation matrix of IEs for the top 10 pairs and show it as a heatmap."` |
-| Per-frame ranking | Snapshot | `"In frame 63, rank all pairs involving ARG8_A by total IE and show electrostatic and VdW components."` |
+| Per-frame ranking | Snapshot | `"In frame 63, rank all pairs involving ARG8_A by total IE. Show total IE and electrostatic IE. If IE_VdW is loaded, also show VdW; otherwise derive it as mean_total minus mean_electrostatic. Return a markdown table with columns: Pair, Total IE (kcal/mol), Electrostatic IE (kcal/mol)."` |
 | Structural comparison across frames | Snapshot | `"Compare the active-site IEs (GLU11_A, ASP10_A, ARG14_A) between frame 0 and frame 125."` |
 | PEN metric interpretation | Summary (Metrics) | `"Which residues have the highest betweenness centrality on average? Show the top 10."` |
 | Energy heatmap | Summary | `"Generate a heatmap of average total IE for all pairs involving the top 30 highest-degree residues."` |
 
 > [!TIP]
 > Combine mode switching with the residue filter for the most effective workflows: start in Summary mode with no filter to identify the globally important pairs, then add those pairs' residues to the residue filter and switch to Timeseries to investigate their dynamics at full temporal resolution.
+
+> [!NOTE]
+> The prompts above are starting points. Adjust residue names, energy thresholds, and frame
+> numbers to match your dataset. Prompts that reference VdW use derivation (Total minus
+> Electrostatic) since only IE_Total and IE_Electrostatic are loaded by default. If you load
+> IE_VdW directly, you can simplify those prompts by referencing the VdW DataFrame directly.
 
 ---
 
@@ -861,3 +887,4 @@ The following are fundamental limitations of the gRINN Chatbot that cannot be wo
 - **Biological interpretation requires internet access and a vision-capable model.** The UniProt and PubMed API calls are made outbound from the dashboard server. In air-gapped deployments the literature retrieval step will silently fail. Chart-based interpretations additionally require a model that supports image input.
 - **Session history is ephemeral.** Conversation history and the token counter are stored only in browser session storage and in the server's in-memory session registry. A page refresh, browser close, or any Settings change that alters the session cache key will discard the entire conversation.
 - **Response quality depends heavily on the protein context you provide.** Without a UniProt accession or a meaningful free-text description in the Protein context field, the biological interpretation will be generic and may cite unrelated papers. Specific, well-annotated proteins yield substantially better results.
+- **Response format is non-deterministic.** The same prompt submitted twice may return a numbered list once and a Markdown table the next. Column names, ordering, and phrasing vary across LLM versions and runs. Prompts that explicitly specify the output format (e.g., "return a markdown table with columns X, Y, Z") significantly reduce this variability but do not eliminate it entirely.

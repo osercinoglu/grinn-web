@@ -546,9 +546,9 @@ def inject_admonitions(content: str) -> str:
     """
     import re
     ADMONITION_MAP = {
-        'WARNING': ('admonition-warning', '⚠️ Warning'),
-        'NOTE':    ('admonition-note',    '📝 Note'),
-        'TIP':     ('admonition-tip',     '💡 Tip'),
+        'WARNING': ('admonition-warning', '⚠️'),
+        'NOTE':    ('admonition-note',    '📝'),
+        'TIP':     ('admonition-tip',     '💡'),
     }
     def replace_marker(match):
         kind = match.group(1).upper()
@@ -1151,6 +1151,19 @@ app.index_string = '''
             
             .help-markdown-content a:hover {
                 color: #495F4F;
+            }
+
+            .help-markdown-content img,
+            #tutorial-markdown-content img,
+            #help-markdown-content img {
+                max-width: 75% !important;
+                width: auto !important;
+                height: auto !important;
+                display: block !important;
+                margin: 16px auto !important;
+                border-radius: 6px;
+                border: 1px solid rgba(90, 122, 96, 0.2);
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             }
             
             .help-toc-sidebar a:hover {
