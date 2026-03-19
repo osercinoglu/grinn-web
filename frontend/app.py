@@ -552,6 +552,9 @@ def split_doc_into_pages(raw_content: str, split_pattern: str) -> list:
             continue
         # Extract title from first heading line
         first_line = chunk.split('\n')[0]
+        # Skip leading preamble that precedes the first real split-pattern heading
+        if j == 0 and not compiled.match(first_line):
+            continue
         title_match = re.match(r'^#+\s+(.+)$', first_line)
         title = title_match.group(1).strip() if title_match else 'Untitled'
         # short_title: remove section number prefix like "1. ", "A. ", "## A. " etc
