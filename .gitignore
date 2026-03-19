@@ -76,3 +76,4 @@ tmp/
 
 # Development/test artifacts
 grinn-worker.log.worktrees/
+.worktrees/
