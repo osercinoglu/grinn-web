@@ -507,37 +507,6 @@ def create_purpose_cell(file_data: dict, file_key: str, input_mode: str, conflic
     return purpose_content
 
 
-def extract_toc_from_markdown(content: str) -> list:
-    """
-    Extract table of contents from markdown content by parsing headings.
-    
-    Args:
-        content: Markdown text content
-        
-    Returns:
-        List of dicts with 'level', 'title', and 'id' for each heading
-    """
-    import re
-    toc = []
-
-    heading_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
-    code_block_pattern = re.compile(r'(```[\s\S]*?```)', re.MULTILINE)
-
-    # Split by fenced code blocks; only scan non-code parts for headings
-    parts = code_block_pattern.split(content)
-    for part in parts:
-        if part.startswith('```'):
-            continue  # skip code blocks
-        for match in heading_pattern.finditer(part):
-            level = len(match.group(1))
-            title = match.group(2).strip()
-            slug = re.sub(r'[^\w\s-]', '', title.lower())
-            slug = re.sub(r'[\s]+', '-', slug)
-            toc.append({'level': level, 'title': title, 'id': slug})
-
-    return toc
-
-
 def inject_admonitions(content: str) -> str:
     """
     Replace GFM admonition markers (> [!WARNING], > [!NOTE], > [!TIP])
@@ -558,49 +527,6 @@ def inject_admonitions(content: str) -> str:
 
     pattern = re.compile(r'^> \[!(WARNING|NOTE|TIP)\]', re.MULTILINE | re.IGNORECASE)
     return pattern.sub(replace_marker, content)
-
-
-def inject_heading_anchors(content: str) -> str:
-    """
-    Replace markdown headings with HTML heading tags that include IDs for TOC navigation.
-    Preserves content inside fenced code blocks.
-    
-    Args:
-        content: Original markdown content
-        
-    Returns:
-        Modified content with HTML headings that have IDs for anchor navigation
-    """
-    import re
-    
-    def replace_heading(match):
-        hashes = match.group(1)
-        title = match.group(2).strip()
-        level = len(hashes)
-        # Generate slug ID matching the TOC extraction
-        slug = re.sub(r'[^\w\s-]', '', title.lower())
-        slug = re.sub(r'[\s]+', '-', slug)
-        # Replace markdown heading with HTML heading that has an ID
-        return f'<h{level} id="{slug}">{title}</h{level}>'
-    
-    # Split content by fenced code blocks to avoid modifying headings inside them
-    # Pattern matches ```...``` blocks (with optional language specifier)
-    code_block_pattern = re.compile(r'(```[\s\S]*?```)', re.MULTILINE)
-    parts = code_block_pattern.split(content)
-    
-    heading_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
-    
-    # Process only non-code-block parts
-    result_parts = []
-    for i, part in enumerate(parts):
-        if part.startswith('```'):
-            # This is a code block - keep it unchanged
-            result_parts.append(part)
-        else:
-            # This is regular content - process headings
-            result_parts.append(heading_pattern.sub(replace_heading, part))
-    
-    return ''.join(result_parts)
 
 
 def split_doc_into_pages(raw_content: str, split_pattern: str) -> list:
