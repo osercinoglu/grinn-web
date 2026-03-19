@@ -2963,7 +2963,10 @@ def create_tutorial_page():
     prevent_initial_call=True,
 )
 def update_tutorial_page(prev_n, next_n, sidebar_n, current):
-    triggered = callback_context.triggered[0]['prop_id']
+    triggered_list = callback_context.triggered
+    if not triggered_list:
+        return current
+    triggered = triggered_list[0]['prop_id']
     total = len(TUTORIAL_PAGES)
     if 'tutorial-next-btn' in triggered:
         return min(current + 1, total - 1)
@@ -2984,6 +2987,8 @@ def update_tutorial_page(prev_n, next_n, sidebar_n, current):
     Input('tutorial-page-index', 'data'),
 )
 def render_tutorial_page(idx):
+    if not TUTORIAL_PAGES or idx >= len(TUTORIAL_PAGES):
+        idx = 0
     page = TUTORIAL_PAGES[idx]
     total = len(TUTORIAL_PAGES)
     content = dcc.Markdown(
