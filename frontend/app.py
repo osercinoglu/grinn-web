@@ -654,7 +654,6 @@ def build_doc_sidebar(pages: list, active_idx: int, prefix: str) -> list:
     Build sidebar navigation buttons for paginated doc pages.
     Groups pages by 'part' value with Part I/Part II divider labels.
     """
-    from dash import html
     items = []
     last_part = None
     for i, page in enumerate(pages):
