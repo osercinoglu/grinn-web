@@ -553,7 +553,8 @@ def inject_admonitions(content: str) -> str:
     def replace_marker(match):
         kind = match.group(1).upper()
         css_class, label = ADMONITION_MAP.get(kind, ('admonition-note', kind.capitalize()))
-        return f'> <span class="admonition-label {css_class}">{label}</span>'
+        type_name = kind[0].upper() + kind[1:].lower()  # WARNING -> Warning
+        return f'> <span class="admonition-label {css_class}">{label} **{type_name}**</span>'
 
     pattern = re.compile(r'^> \[!(WARNING|NOTE|TIP)\]', re.MULTILINE | re.IGNORECASE)
     return pattern.sub(replace_marker, content)
@@ -602,45 +603,134 @@ def inject_heading_anchors(content: str) -> str:
     return ''.join(result_parts)
 
 
-def read_help_content() -> tuple:
+def split_doc_into_pages(raw_content: str, split_pattern: str) -> list:
     """
-    Read help markdown file and extract TOC.
-    
-    Returns:
-        Tuple of (markdown_content, toc_list)
+    Split raw markdown into pages at headings matching split_pattern.
+    Returns list of dicts:
+      {'title': str, 'short_title': str, 'content': str, 'part': str}
+    content is preprocessed with inject_admonitions only.
+    """
+    import re
+    compiled = re.compile(split_pattern, re.MULTILINE)
+    lines = raw_content.split('\n')
+    split_indices = [0]
+    for i, line in enumerate(lines):
+        if i > 0 and compiled.match(line):
+            split_indices.append(i)
+    split_indices.append(len(lines))
+
+    pages = []
+    for j in range(len(split_indices) - 1):
+        chunk = '\n'.join(lines[split_indices[j]:split_indices[j+1]]).strip()
+        if not chunk:
+            continue
+        # Extract title from first heading line
+        first_line = chunk.split('\n')[0]
+        title_match = re.match(r'^#+\s+(.+)$', first_line)
+        title = title_match.group(1).strip() if title_match else 'Untitled'
+        # short_title: remove section number prefix like "1. ", "A. ", "## A. " etc
+        short_title = re.sub(r'^(?:#{1,3}\s+)?(?:[A-H]|\d+)\.\s+', '', title).strip()
+        if not short_title:
+            short_title = title
+        # Determine part
+        if re.match(r'^## [A-H]\.', first_line):
+            part = 'II'
+        elif re.match(r'^### \d+\.', first_line):
+            part = 'I'
+        else:
+            part = ''
+        processed = inject_admonitions(chunk)
+        pages.append({
+            'title': title,
+            'short_title': short_title,
+            'content': processed,
+            'part': part,
+        })
+    return pages
+
+
+def build_doc_sidebar(pages: list, active_idx: int, prefix: str) -> list:
+    """
+    Build sidebar navigation buttons for paginated doc pages.
+    Groups pages by 'part' value with Part I/Part II divider labels.
+    """
+    from dash import html
+    items = []
+    last_part = None
+    for i, page in enumerate(pages):
+        part = page.get('part', '')
+        if part and part != last_part:
+            label = f'Part {part}'
+            items.append(html.Div(label, className='doc-sidebar-part-label'))
+            last_part = part
+        elif not part and last_part is not None:
+            last_part = None
+        btn_class = 'doc-sidebar-item active' if i == active_idx else 'doc-sidebar-item'
+        items.append(html.Button(
+            page['short_title'],
+            id={'type': f'{prefix}-sidebar-btn', 'index': i},
+            className=btn_class,
+            n_clicks=0,
+        ))
+    return items
+
+
+def read_help_content() -> list:
+    """
+    Read help markdown file and split into pages.
+    Returns list of page dicts: {'title', 'short_title', 'content', 'part'}
     """
     help_file_path = os.path.join(os.path.dirname(__file__), '..', 'docs', 'help.md')
-    
     try:
         with open(help_file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        toc = extract_toc_from_markdown(content)
-        # Inject anchor tags for TOC navigation
-        content_with_anchors = inject_heading_anchors(inject_admonitions(content))
-        return content_with_anchors, toc
+        return split_doc_into_pages(content, r'^## \d+\.')
     except FileNotFoundError:
         logger.error(f"Help file not found: {help_file_path}")
-        return "# Help\n\nHelp documentation is not available.", []
+        return [{'title': 'Help', 'short_title': 'Help', 'content': '# Help\n\nHelp documentation is not available.', 'part': ''}]
     except Exception as e:
         logger.error(f"Error reading help file: {e}")
-        return f"# Help\n\nError loading help documentation: {str(e)}", []
+        return [{'title': 'Help', 'short_title': 'Help', 'content': f'# Help\n\nError loading help documentation: {str(e)}', 'part': ''}]
 
 
-def read_tutorial_content() -> tuple:
-    """Read tutorial markdown file and extract TOC."""
+def read_tutorial_content() -> list:
+    """
+    Read tutorial markdown file and split into pages.
+    Returns list of page dicts for pages 1-12 (welcome page added separately).
+    """
     tutorial_file_path = os.path.join(os.path.dirname(__file__), '..', 'docs', 'tutorial.md')
     try:
         with open(tutorial_file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        toc = extract_toc_from_markdown(content)
-        content_with_anchors = inject_heading_anchors(inject_admonitions(content))
-        return content_with_anchors, toc
+        return split_doc_into_pages(content, r'^(?:### \d+\.|## [A-H]\.)')
     except FileNotFoundError:
         logger.error(f"Tutorial file not found: {tutorial_file_path}")
-        return "# Tutorial\n\nTutorial documentation is coming soon.", []
+        return [{'title': 'Tutorial', 'short_title': 'Tutorial', 'content': '# Tutorial\n\nTutorial documentation is coming soon.', 'part': ''}]
     except Exception as e:
         logger.error(f"Error reading tutorial file: {e}")
-        return f"# Tutorial\n\nError loading tutorial documentation: {str(e)}", []
+        return [{'title': 'Tutorial', 'short_title': 'Tutorial', 'content': f'# Tutorial\n\nError loading tutorial documentation: {str(e)}', 'part': ''}]
+
+
+TUTORIAL_WELCOME = {
+    'title': 'Welcome',
+    'short_title': 'Welcome',
+    'part': '',
+    'content': """
+## Welcome to the i-gRINN Tutorial
+
+This tutorial guides you step by step through the i-gRINN web service — from uploading
+your molecular dynamics data to interpreting results with the built-in AI chatbot.
+
+**How to use this tutorial:**
+- Click **Begin Tutorial →** below (or press Next) to proceed page by page.
+- Use the sidebar on the left to jump directly to any section.
+- **Part I** covers the web interface: job submission, monitoring, and the results dashboard.
+- **Part II** covers the gRINN Chatbot: AI-assisted biological interpretation.
+"""
+}
+
+TUTORIAL_PAGES = [TUTORIAL_WELCOME] + read_tutorial_content()
+HELP_PAGES = read_help_content()
 
 
 # Initialize Dash app
