@@ -2759,160 +2759,43 @@ def create_dashboard_page(job_id: str):
 
 
 def create_help_page():
-    """Create help/documentation page with floating TOC sidebar."""
-    content, toc = read_help_content()
-    
-    # Build TOC sidebar links
-    toc_links = []
-    for item in toc:
-        indent = (item['level'] - 1) * 15  # Indent based on heading level
-        toc_links.append(
-            html.A(
-                item['title'],
-                href=f"#{item['id']}",
-                style={
-                    'display': 'block',
-                    'padding': '6px 12px',
-                    'paddingLeft': f'{12 + indent}px',
-                    'color': '#5A7A60' if item['level'] == 1 else '#666',
-                    'textDecoration': 'none',
-                    'fontSize': '0.85rem' if item['level'] > 1 else '0.95rem',
-                    'fontWeight': '500' if item['level'] == 1 else '400',
-                    'borderLeft': '3px solid transparent',
-                    'transition': 'all 0.2s ease'
-                }
-            )
-        )
-    
+    """Create paginated help page with sidebar navigation."""
     return html.Div([
-        dcc.Location(id='help-url', refresh=False),
-        dcc.Store(id='help-scroll-trigger', data=0),  # Dummy store for scroll callback
-        
-        # Two-column layout container
-        html.Div([
-            # Left sidebar - Table of Contents (fixed position)
-            html.Div([
-                html.Div([
-                    html.H5([
-                        html.I(className="fas fa-list", style={'marginRight': '8px'}),
-                        "Contents"
-                    ], style={
-                        'color': '#5A7A60',
-                        'marginBottom': '15px',
-                        'paddingBottom': '10px',
-                        'borderBottom': '2px solid rgba(90, 122, 96, 0.2)'
-                    }),
-                    html.Div(toc_links, id='help-toc-links')
-                ])
-            ], style={
-                'width': '250px',
-                'flexShrink': '0',
-                'paddingRight': '30px',
-                'borderRight': '1px solid rgba(90, 122, 96, 0.15)',
-                'display': 'none',  # Hide on mobile, show on larger screens via media query
-                'position': 'sticky',
-                'top': '20px',
-                'maxHeight': 'calc(100vh - 40px)',
-                'overflowY': 'auto',
-                'alignSelf': 'flex-start',
-            }, className='help-toc-sidebar', id='help-toc-sidebar'),
-            
-            # Right content - Main documentation
-            html.Div([
-                # Header with navigation
-                html.Div([
-                    html.Div([
-                        html.A(
-                            [html.I(className="fas fa-arrow-left", style={'marginRight': '8px'}), "Back to Main"],
-                            href="/",
-                            style={
-                                'fontSize': '0.9rem',
-                                'padding': '8px 16px',
-                                'display': 'inline-block',
-                                'backgroundColor': 'rgba(108, 117, 125, 0.1)',
-                                'color': '#6c757d',
-                                'textDecoration': 'none',
-                                'border': '1px solid rgba(108, 117, 125, 0.3)',
-                                'borderRadius': '5px',
-                                'fontWeight': '500'
-                            }
-                        )
-                    ], style={'marginBottom': '20px'}),
-                    
-                ]),
-                
-                # Markdown content
-                html.Div([
-                    dcc.Markdown(
-                        content,
-                        id='help-markdown-content',
-                        dangerously_allow_html=True,  # Allow anchor tags for TOC navigation
-                        style={
-                            'lineHeight': '1.8',
-                            'fontSize': '1rem'
-                        },
-                        className='help-markdown-content'
-                    )
-                ], style={
-                    'backgroundColor': 'white',
-                    'padding': '40px',
-                    'borderRadius': '10px',
-                    'boxShadow': '0 2px 10px rgba(0,0,0,0.08)',
-                    'border': '1px solid rgba(90, 122, 96, 0.1)'
-                }),
-                
-                # Bottom navigation
-                html.Div([
-                    html.A(
-                        [html.I(className="fas fa-home", style={'marginRight': '8px'}), "Submit a Job"],
-                        href="/",
-                        style={
-                            'fontSize': '0.95rem',
-                            'padding': '10px 20px',
-                            'display': 'inline-block',
-                            'backgroundColor': '#5A7A60',
-                            'color': 'white',
-                            'textDecoration': 'none',
-                            'borderRadius': '5px',
-                            'fontWeight': '500',
-                            'marginRight': '10px'
-                        }
-                    ),
-                    html.A(
-                        [html.I(className="fas fa-list-alt", style={'marginRight': '8px'}), "View Job Queue"],
-                        href="/queue",
-                        style={
-                            'fontSize': '0.95rem',
-                            'padding': '10px 20px',
-                            'display': 'inline-block',
-                            'backgroundColor': 'rgba(90, 122, 96, 0.1)',
-                            'color': '#5A7A60',
-                            'textDecoration': 'none',
-                            'border': '1px solid rgba(90, 122, 96, 0.3)',
-                            'borderRadius': '5px',
-                            'fontWeight': '500'
-                        }
-                    )
-                ], style={'textAlign': 'center', 'marginTop': '40px'})
-            ], style={
-                'flex': '1',
-                'minWidth': '0',
-                'paddingLeft': '30px'
-            }, className='help-main-content')
-        ], style={
-            'display': 'flex',
-            'maxWidth': '1200px',
-            'margin': '0 auto',
-            'padding': '20px',
-            'minHeight': '100vh'
-        }),
-        
-        # Footer (outside the flex container for full width)
-        html.Div([
-            create_footer()
-        ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '0 20px'})
-    ])
+        dcc.Store(id='help-page-index', data=0),
+        dcc.Store(id='help-scroll-trigger', data=0),
 
+        html.Div([
+            # LEFT SIDEBAR
+            html.Div([
+                html.Div("Help", className='doc-sidebar-header'),
+                html.Hr(),
+                html.Div(id='help-sidebar-nav'),
+            ], className='doc-sidebar'),
+
+            # RIGHT CONTENT
+            html.Div([
+                html.A("← Back to Main", href="/", className='doc-back-link'),
+                html.Div(id='help-page-content', className='doc-content-card'),
+                html.Div([
+                    html.Button(
+                        [html.I(className='fas fa-chevron-left'), " Previous"],
+                        id='help-prev-btn',
+                        className='doc-nav-btn doc-nav-prev',
+                        n_clicks=0,
+                    ),
+                    html.Span(id='help-page-indicator', className='doc-page-indicator'),
+                    html.Button(
+                        ["Next ", html.I(className='fas fa-chevron-right')],
+                        id='help-next-btn',
+                        className='doc-nav-btn doc-nav-next',
+                        n_clicks=0,
+                    ),
+                ], className='doc-nav-bar'),
+            ], className='doc-main-content'),
+        ], className='doc-layout'),
+
+        create_footer(),
+    ])
 
 def create_tutorial_page():
     """Create paginated tutorial page with sidebar navigation."""
@@ -3018,28 +2901,64 @@ app.clientside_callback(
 )
 
 
-# Clientside callback for TOC scroll navigation on help page
+@app.callback(
+    Output('help-page-index', 'data'),
+    [Input('help-prev-btn', 'n_clicks'),
+     Input('help-next-btn', 'n_clicks'),
+     Input({'type': 'help-sidebar-btn', 'index': ALL}, 'n_clicks')],
+    State('help-page-index', 'data'),
+    prevent_initial_call=True,
+)
+def update_help_page(prev_n, next_n, sidebar_n, current):
+    triggered_list = callback_context.triggered
+    if not triggered_list:
+        return current
+    triggered = triggered_list[0]['prop_id']
+    total = len(HELP_PAGES)
+    if 'help-next-btn' in triggered:
+        return min(current + 1, total - 1)
+    if 'help-prev-btn' in triggered:
+        return max(current - 1, 0)
+    if 'help-sidebar-btn' in triggered:
+        return json.loads(triggered.split('.')[0])['index']
+    return current
+
+
+@app.callback(
+    [Output('help-page-content', 'children'),
+     Output('help-sidebar-nav', 'children'),
+     Output('help-prev-btn', 'disabled'),
+     Output('help-next-btn', 'disabled'),
+     Output('help-next-btn', 'children'),
+     Output('help-page-indicator', 'children')],
+    Input('help-page-index', 'data'),
+)
+def render_help_page(idx):
+    if not HELP_PAGES or idx >= len(HELP_PAGES):
+        idx = 0
+    page = HELP_PAGES[idx]
+    total = len(HELP_PAGES)
+    content = dcc.Markdown(
+        page['content'],
+        dangerously_allow_html=True,
+        className='help-markdown-content',
+    )
+    sidebar = build_doc_sidebar(HELP_PAGES, idx, 'help')
+    next_label = ["Next ", html.I(className='fas fa-chevron-right')]
+    indicator = f"{idx + 1} / {total}"
+    return content, sidebar, (idx == 0), (idx == total - 1), next_label, indicator
+
+
 app.clientside_callback(
     """
-    function(hash) {
-        // Handle hash changes for TOC navigation
-        var targetHash = hash || window.location.hash;
-        if (targetHash) {
-            var elementId = targetHash.replace('#', '');
-            // Small delay to ensure DOM is fully rendered
-            setTimeout(function() {
-                var element = document.getElementById(elementId);
-                if (element) {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            }, 100);
-        }
-        return 0;  // Return dummy value
+    function(idx) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return idx;
     }
     """,
     Output('help-scroll-trigger', 'data'),
-    Input('help-url', 'hash'),
-    prevent_initial_call=False
+    Input('help-page-index', 'data'),
+    prevent_initial_call=True,
 )
 
 # Client-side callback to update bookmark URL with actual browser URL
