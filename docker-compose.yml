@@ -64,6 +64,10 @@ services:
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
       - EXAMPLE_DATA_PATH_TRAJECTORY=/app/example_data/trajectory
       - EXAMPLE_DATA_PATH_ENSEMBLE=/app/example_data/ensemble
+      - EXAMPLE_RESULTS1_PATH=/app/example_results/1
+      - EXAMPLE_RESULTS1_HOST_PATH=${EXAMPLE_RESULTS1_PATH:-}
+      - EXAMPLE_RESULTS2_PATH=/app/example_results/2
+      - EXAMPLE_RESULTS2_HOST_PATH=${EXAMPLE_RESULTS2_PATH:-}
       # Dashboard URL settings (override baked-in values from image)
       - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
       - DASHBOARD_PUBLIC_HOST=${DASHBOARD_PUBLIC_HOST:-localhost}
@@ -73,6 +77,8 @@ services:
       - webapp_logs:/app/logs
       - ${EXAMPLE_DATA_PATH_TRAJECTORY}:/app/example_data/trajectory:ro
       - ${EXAMPLE_DATA_PATH_ENSEMBLE}:/app/example_data/ensemble:ro
+      - ${EXAMPLE_RESULTS1_PATH:-}:/app/example_results/1:ro
+      - ${EXAMPLE_RESULTS2_PATH:-}:/app/example_results/2:ro
       - /var/run/docker.sock:/var/run/docker.sock  # For GROMACS version discovery
     depends_on:
       postgres:
