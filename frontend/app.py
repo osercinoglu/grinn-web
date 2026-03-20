@@ -4,7 +4,9 @@ A Dash-based web interface for submitting and monitoring gRINN computational job
 """
 
 import os
+import re
 import sys
+import time
 import base64
 import json
 import logging
@@ -529,6 +531,46 @@ def inject_admonitions(content: str) -> str:
     return pattern.sub(replace_marker, content)
 
 
+def inject_subheading_anchors(content: str) -> str:
+    """Inject anchor elements before every heading so subheadings are URL-linkable."""
+    lines = content.split('\n')
+    result = []
+    for line in lines:
+        if re.match(r'^#{1,6}\s+', line):
+            slug = _make_slug(line)
+            result.append(f'<a id="{slug}" class="doc-anchor"></a>')
+        result.append(line)
+    return '\n'.join(result)
+
+
+def _make_slug(title: str) -> str:
+    """Convert a page title to a URL-safe slug."""
+    t = re.sub(r'^#+\s*', '', title)           # strip heading markers
+    t = t.lower()
+    t = re.sub(r'([a-z0-9])\.\s', r'\1-', t)  # "2.4. " → "2.4-", "A. " → "a-"
+    t = re.sub(r'[^a-z0-9.]+', '-', t)         # non-alnum-or-dot → hyphen
+    t = re.sub(r'-+', '-', t).strip('-').rstrip('.')
+    return t
+
+
+def _hash_to_index(url_hash: str, pages: list) -> int:
+    slug = (url_hash or '').lstrip('#')
+    if not slug:
+        return 0
+    # Check page-level slugs first
+    slugs = [p.get('slug', '') for p in pages]
+    try:
+        return slugs.index(slug)
+    except ValueError:
+        pass
+    # Fall back to subheading slugs
+    for i, page in enumerate(pages):
+        for sub in page.get('subheadings', []):
+            if sub['slug'] == slug:
+                return i
+    return 0
+
+
 def split_doc_into_pages(raw_content: str, split_pattern: str) -> list:
     """
     Split raw markdown into pages at headings matching split_pattern.
@@ -568,12 +610,26 @@ def split_doc_into_pages(raw_content: str, split_pattern: str) -> list:
             part = 'I'
         else:
             part = ''
+        # Extract subheadings (direct children only: page_level + 1)
+        level_match = re.match(r'^(#+)', first_line)
+        page_level = len(level_match.group(1)) if level_match else 1
+        chunk_lines = chunk.split('\n')
+        subheadings = []
+        for line in chunk_lines[1:]:
+            m = re.match(r'^(#+)\s+', line)
+            if m and len(m.group(1)) == page_level + 1:
+                sub_title = re.sub(r'^#+\s*', '', line).strip()
+                subheadings.append({'title': sub_title, 'slug': _make_slug(line)})
+
         processed = inject_admonitions(chunk)
+        processed = inject_subheading_anchors(processed)
         pages.append({
             'title': title,
             'short_title': short_title,
             'content': processed,
             'part': part,
+            'slug': _make_slug(first_line),
+            'subheadings': subheadings,
         })
     return pages
 
@@ -600,6 +656,14 @@ def build_doc_sidebar(pages: list, active_idx: int, prefix: str) -> list:
             className=btn_class,
             n_clicks=0,
         ))
+        # Expand subheadings under the active page only
+        if i == active_idx:
+            for sub in page.get('subheadings', []):
+                items.append(html.A(
+                    sub['title'],
+                    href=f'#{sub["slug"]}',
+                    className='doc-sidebar-subitem',
+                ))
     return items
 
 
@@ -615,10 +679,10 @@ def read_help_content() -> list:
         return split_doc_into_pages(content, r'^## \d+\.')
     except FileNotFoundError:
         logger.error(f"Help file not found: {help_file_path}")
-        return [{'title': 'Help', 'short_title': 'Help', 'content': '# Help\n\nHelp documentation is not available.', 'part': ''}]
+        return [{'title': 'Help', 'short_title': 'Help', 'content': '# Help\n\nHelp documentation is not available.', 'part': '', 'slug': '', 'subheadings': []}]
     except Exception as e:
         logger.error(f"Error reading help file: {e}")
-        return [{'title': 'Help', 'short_title': 'Help', 'content': f'# Help\n\nError loading help documentation: {str(e)}', 'part': ''}]
+        return [{'title': 'Help', 'short_title': 'Help', 'content': f'# Help\n\nError loading help documentation: {str(e)}', 'part': '', 'slug': '', 'subheadings': []}]
 
 
 def read_tutorial_content() -> list:
@@ -633,16 +697,18 @@ def read_tutorial_content() -> list:
         return split_doc_into_pages(content, r'^(?:### \d+\.|## [A-H]\.)')
     except FileNotFoundError:
         logger.error(f"Tutorial file not found: {tutorial_file_path}")
-        return [{'title': 'Tutorial', 'short_title': 'Tutorial', 'content': '# Tutorial\n\nTutorial documentation is coming soon.', 'part': ''}]
+        return [{'title': 'Tutorial', 'short_title': 'Tutorial', 'content': '# Tutorial\n\nTutorial documentation is coming soon.', 'part': '', 'slug': '', 'subheadings': []}]
     except Exception as e:
         logger.error(f"Error reading tutorial file: {e}")
-        return [{'title': 'Tutorial', 'short_title': 'Tutorial', 'content': f'# Tutorial\n\nError loading tutorial documentation: {str(e)}', 'part': ''}]
+        return [{'title': 'Tutorial', 'short_title': 'Tutorial', 'content': f'# Tutorial\n\nError loading tutorial documentation: {str(e)}', 'part': '', 'slug': '', 'subheadings': []}]
 
 
 TUTORIAL_WELCOME = {
     'title': 'Welcome',
     'short_title': 'Welcome',
     'part': '',
+    'slug': 'welcome',
+    'subheadings': [],
     'content': """
 ## Welcome to the i-gRINN Tutorial
 
@@ -2687,11 +2753,14 @@ def create_dashboard_page(job_id: str):
     ], style={'margin': '0', 'padding': '0'})
 
 
-def create_help_page():
+def create_help_page(initial_index=0):
     """Create paginated help page with sidebar navigation."""
     return html.Div([
-        dcc.Store(id='help-page-index', data=0),
+        dcc.Store(id='help-page-index', data=initial_index),
         dcc.Store(id='help-scroll-trigger', data=0),
+        dcc.Store(id='help-slugs', data=[p['slug'] for p in HELP_PAGES]),
+        dcc.Store(id='help-content-version', data=0),
+        dcc.Store(id='help-hash-scroll', data=0),
 
         html.Div([
             # LEFT SIDEBAR
@@ -2726,11 +2795,14 @@ def create_help_page():
         create_footer(),
     ])
 
-def create_tutorial_page():
+def create_tutorial_page(initial_index=0):
     """Create paginated tutorial page with sidebar navigation."""
     return html.Div([
-        dcc.Store(id='tutorial-page-index', data=0),
+        dcc.Store(id='tutorial-page-index', data=initial_index),
         dcc.Store(id='tutorial-scroll-trigger', data=0),
+        dcc.Store(id='tutorial-slugs', data=[p['slug'] for p in TUTORIAL_PAGES]),
+        dcc.Store(id='tutorial-content-version', data=0),
+        dcc.Store(id='tutorial-hash-scroll', data=0),
 
         html.Div([
             # LEFT SIDEBAR
@@ -2795,7 +2867,8 @@ def update_tutorial_page(prev_n, next_n, sidebar_n, current):
      Output('tutorial-prev-btn', 'disabled'),
      Output('tutorial-next-btn', 'disabled'),
      Output('tutorial-next-btn', 'children'),
-     Output('tutorial-page-indicator', 'children')],
+     Output('tutorial-page-indicator', 'children'),
+     Output('tutorial-content-version', 'data')],
     Input('tutorial-page-index', 'data'),
 )
 def render_tutorial_page(idx):
@@ -2814,19 +2887,59 @@ def render_tutorial_page(idx):
     else:
         next_label = ["Next ", html.I(className='fas fa-chevron-right')]
     indicator = f"{idx + 1} / {total}" if idx > 0 else ""
-    return content, sidebar, (idx == 0), (idx == total - 1), next_label, indicator
+    return content, sidebar, (idx == 0), (idx == total - 1), next_label, indicator, time.time()
 
 
 app.clientside_callback(
     """
-    function(idx) {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        return idx;
+    function(version, idx, slugs) {
+        if (!slugs || idx === null || idx === undefined) return version;
+        var pageSlug = slugs[idx] || '';
+        var currentHash = window.location.hash.slice(1);
+        var isPageSlug = slugs.indexOf(currentHash) !== -1;
+
+        if (!currentHash || isPageSlug) {
+            if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            setTimeout(function() {
+                var el = document.getElementById(currentHash);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }, 0);
+        }
+        return version;
     }
     """,
     Output('tutorial-scroll-trigger', 'data'),
-    Input('tutorial-page-index', 'data'),
-    prevent_initial_call=True,
+    Input('tutorial-content-version', 'data'),
+    State('tutorial-page-index', 'data'),
+    State('tutorial-slugs', 'data'),
+)
+
+app.clientside_callback(
+    """
+    function(urlHash, slugs) {
+        if (!urlHash) return window.dash_clientside.no_update;
+        var hash = urlHash.slice(1);
+        if (!hash) return window.dash_clientside.no_update;
+        // Page-level slug: let the existing content-version callback handle it
+        if (slugs && slugs.indexOf(hash) !== -1) return window.dash_clientside.no_update;
+        // Subheading slug: scroll to anchor
+        setTimeout(function() {
+            var el = document.getElementById(hash);
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 0);
+        return Date.now();
+    }
+    """,
+    Output('tutorial-hash-scroll', 'data'),
+    Input('url', 'hash'),
+    State('tutorial-slugs', 'data'),
 )
 
 
@@ -2859,7 +2972,8 @@ def update_help_page(prev_n, next_n, sidebar_n, current):
      Output('help-prev-btn', 'disabled'),
      Output('help-next-btn', 'disabled'),
      Output('help-next-btn', 'children'),
-     Output('help-page-indicator', 'children')],
+     Output('help-page-indicator', 'children'),
+     Output('help-content-version', 'data')],
     Input('help-page-index', 'data'),
 )
 def render_help_page(idx):
@@ -2875,19 +2989,57 @@ def render_help_page(idx):
     sidebar = build_doc_sidebar(HELP_PAGES, idx, 'help')
     next_label = ["Next ", html.I(className='fas fa-chevron-right')]
     indicator = f"{idx + 1} / {total}"
-    return content, sidebar, (idx == 0), (idx == total - 1), next_label, indicator
+    return content, sidebar, (idx == 0), (idx == total - 1), next_label, indicator, time.time()
 
 
 app.clientside_callback(
     """
-    function(idx) {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        return idx;
+    function(version, idx, slugs) {
+        if (!slugs || idx === null || idx === undefined) return version;
+        var pageSlug = slugs[idx] || '';
+        var currentHash = window.location.hash.slice(1);
+        var isPageSlug = slugs.indexOf(currentHash) !== -1;
+
+        if (!currentHash || isPageSlug) {
+            if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            setTimeout(function() {
+                var el = document.getElementById(currentHash);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }, 0);
+        }
+        return version;
     }
     """,
     Output('help-scroll-trigger', 'data'),
-    Input('help-page-index', 'data'),
-    prevent_initial_call=True,
+    Input('help-content-version', 'data'),
+    State('help-page-index', 'data'),
+    State('help-slugs', 'data'),
+)
+
+app.clientside_callback(
+    """
+    function(urlHash, slugs) {
+        if (!urlHash) return window.dash_clientside.no_update;
+        var hash = urlHash.slice(1);
+        if (!hash) return window.dash_clientside.no_update;
+        if (slugs && slugs.indexOf(hash) !== -1) return window.dash_clientside.no_update;
+        setTimeout(function() {
+            var el = document.getElementById(hash);
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 0);
+        return Date.now();
+    }
+    """,
+    Output('help-hash-scroll', 'data'),
+    Input('url', 'hash'),
+    State('help-slugs', 'data'),
 )
 
 # Client-side callback to update bookmark URL with actual browser URL
@@ -2916,10 +3068,13 @@ app.layout = html.Div([
 # URL routing callback
 @app.callback(
     Output('page-content', 'children'),
-    [Input('url', 'pathname')]
+    [Input('url', 'pathname'), Input('url', 'hash')]
 )
-def display_page(pathname):
+def display_page(pathname, url_hash):
     """Handle URL routing for different pages."""
+    if callback_context.triggered and \
+       callback_context.triggered[0]['prop_id'] == 'url.hash':
+        return dash.no_update
     logger.info(f"display_page called with pathname: {repr(pathname)}")
     
     # Normalize pathname - strip trailing slashes for consistent matching
@@ -3034,10 +3189,10 @@ def display_page(pathname):
         return create_dashboard_page(job_id)
     elif pathname == '/help':
         # Help/documentation page
-        return create_help_page()
+        return create_help_page(_hash_to_index(url_hash, HELP_PAGES))
     elif pathname == '/tutorial':
         # Tutorial/documentation page
-        return create_tutorial_page()
+        return create_tutorial_page(_hash_to_index(url_hash, TUTORIAL_PAGES))
     else:
         # 404 page
         return html.Div([

@@ -780,6 +780,25 @@ blockquote:has(.admonition-tip) {
     font-weight: 600;
     border-left-color: #5A7A60;
 }
+.doc-sidebar-subitem {
+    display: block;
+    padding: 4px 10px 4px 22px;
+    font-size: 0.78rem;
+    color: #777;
+    text-decoration: none;
+    border-left: 2px solid rgba(90,122,96,0.2);
+    margin-left: 6px;
+    margin-bottom: 1px;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.doc-sidebar-subitem:hover {
+    color: #5A7A60;
+    border-left-color: #5A7A60;
+    background-color: rgba(90,122,96,0.04);
+}
 .doc-main-content { flex: 1; min-width: 0; padding-left: 32px; }
 .doc-content-card {
     background: white;
