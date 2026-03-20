@@ -2143,6 +2143,95 @@ def create_input_mode_selector():
         ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '10px'})
     ], className="panel", style={'padding': '15px', 'marginBottom': '15px'})
 
+def _build_example_data_section(mode: str) -> html.Div:
+    """Build the example data section children for the given mode."""
+    mode = mode or 'trajectory'
+
+    if mode == 'ensemble':
+        data_available = EXAMPLE_DATA_ENSEMBLE_AVAILABLE
+        example_path = config.example_data_path_ensemble
+        mode_label = "Ensemble"
+    else:
+        data_available = EXAMPLE_DATA_TRAJECTORY_AVAILABLE
+        example_path = config.example_data_path_trajectory
+        mode_label = "Trajectory"
+
+    _example_buttons = []
+    if EXAMPLE_RESULTS1_AVAILABLE:
+        _col = "col-6" if EXAMPLE_RESULTS2_AVAILABLE else "col-12"
+        _example_buttons.append(html.Div([
+            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
+                    "Protein Only Example Results"],
+                   href="/dashboard/example-results-1", target="_blank",
+                   className="btn btn-outline-info btn-sm",
+                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
+                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
+        ], className=_col))
+    if EXAMPLE_RESULTS2_AVAILABLE:
+        _col = "col-6" if EXAMPLE_RESULTS1_AVAILABLE else "col-12"
+        _example_buttons.append(html.Div([
+            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
+                    "Protein+Ligand Example Results"],
+                   href="/dashboard/example-results-2", target="_blank",
+                   className="btn btn-outline-info btn-sm",
+                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
+                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
+        ], className=_col))
+    results_button = html.Div(
+        html.Div(_example_buttons, className="row g-2"),
+        style={'marginTop': '8px'}
+    ) if _example_buttons else html.Div()
+
+    if not data_available:
+        if EXAMPLE_RESULTS1_AVAILABLE or EXAMPLE_RESULTS2_AVAILABLE:
+            return html.Div([
+                html.Div(id="load-example-data-btn", style={'display': 'none'}),
+                results_button
+            ])
+        return html.Div(id="load-example-data-btn", style={'display': 'none'})
+
+    example_files = _get_example_files(example_path)
+    total_size_bytes = 0
+    for filename in example_files:
+        file_path = os.path.join(example_path, filename)
+        if os.path.exists(file_path):
+            total_size_bytes += os.path.getsize(file_path)
+    total_size_mb = total_size_bytes / (1024 * 1024)
+
+    return html.Div([
+        html.Div([
+            html.Button([
+                html.I(className="fas fa-flask", style={'marginRight': '8px'}),
+                f"Load {mode_label} Example Data"
+            ],
+            id="load-example-data-btn",
+            className="btn btn-outline-info btn-sm",
+            style={
+                'width': '100%',
+                'marginTop': '10px',
+                'padding': '8px 16px',
+                'fontSize': '0.85rem'
+            })
+        ], style={'textAlign': 'center'}),
+        html.Div([
+            html.A([
+                html.I(className="fas fa-file-archive", style={'marginRight': '6px'}),
+                f"Download example files ({total_size_mb:.1f} MB)"
+            ],
+            href=f"/download-example/{mode}",
+            target="_blank",
+            style={
+                'display': 'inline-block',
+                'fontSize': '0.8rem',
+                'color': '#5A7A60',
+                'textDecoration': 'none',
+                'marginTop': '8px'
+            })
+        ], style={'textAlign': 'center'}) if example_files else html.Div(),
+        results_button
+    ])
+
+
 def create_file_upload_section():
     """Create the file upload section."""
     return html.Div([
@@ -2236,23 +2325,7 @@ def create_file_upload_section():
                 ], id="upload-panel", className="upload-panel", style={'position': 'relative'}),
                 # Example Data section (dynamically updated based on mode)
                 # Container for button and download links
-                html.Div(id="example-data-section", children=[
-                    # Default content - will be updated by callback based on mode
-                    html.Div([
-                        html.Button([
-                            html.I(className="fas fa-flask", style={'marginRight': '8px'}),
-                            "Load Example Data"
-                        ],
-                        id="load-example-data-btn",
-                        className="btn btn-outline-info btn-sm",
-                        style={
-                            'width': '100%',
-                            'marginTop': '10px',
-                            'padding': '8px 16px',
-                            'fontSize': '0.85rem'
-                        })
-                    ], style={'textAlign': 'center'}) if (EXAMPLE_DATA_TRAJECTORY_AVAILABLE or EXAMPLE_DATA_ENSEMBLE_AVAILABLE) else html.Div(id="load-example-data-btn", style={'display': 'none'})
-                ]),
+                html.Div(id="example-data-section", children=_build_example_data_section('trajectory')),
                 # Confirmation modal for loading example data
                 dbc.Modal([
                     dbc.ModalHeader(dbc.ModalTitle([
@@ -2585,59 +2658,49 @@ def create_job_queue_page():
             
             # Filter controls with flexbox layout
             html.Div([
-                # Search box
-                html.Div([
-                    html.Label("Search by Job ID:", style={'marginBottom': '5px', 'fontWeight': 'bold', 'fontSize': '0.9rem', 'display': 'block'}),
-                    dcc.Input(
-                        id='queue-search-input',
-                        type='text',
-                        placeholder='e.g., 6-sad-squid-snuggle-softly',
-                        style={'width': '100%', 'padding': '8px', 'borderRadius': '4px', 'border': '1px solid #ccc', 'fontSize': '0.9rem'}
-                    )
-                ], style={'minWidth': '280px', 'flex': '0 0 auto'}),
-                
-                html.Div([
-                    html.Label("Status Filter:", style={'marginBottom': '5px', 'fontWeight': 'bold', 'fontSize': '0.9rem', 'display': 'block'}),
-                    dcc.Dropdown(
-                        id='queue-status-filter',
-                        options=[
-                            {'label': 'All Jobs', 'value': 'all'},
-                            {'label': 'Pending', 'value': 'pending'},
-                            {'label': 'Queued', 'value': 'queued'},
-                            {'label': 'Running', 'value': 'running'},
-                            {'label': 'Completed', 'value': 'completed'},
-                            {'label': 'Failed', 'value': 'failed'},
-                            {'label': 'Cancelled', 'value': 'cancelled'}
-                        ],
-                        value='all',
-                        style={'fontSize': '0.9rem'}
-                    )
-                ], style={'minWidth': '200px', 'flex': '0 0 auto'}),
-                
-                html.Div([
-                    html.Button(
-                        [html.I(className="fas fa-sync", style={'marginRight': '8px'}), "Refresh Queue"],
-                        id="queue-refresh-btn",
-                        style={
-                            'fontSize': '0.9rem',
-                            'padding': '8px 16px',
-                            'backgroundColor': 'rgba(90, 122, 96, 0.1)',
-                            'color': '#5A7A60',
-                            'border': '1px solid rgba(90, 122, 96, 0.3)',
-                            'borderRadius': '5px',
-                            'fontWeight': '500',
-                            'cursor': 'pointer',
-                            'marginTop': '24px',
-                            'whiteSpace': 'nowrap'
-                        }
-                    )
-                ], style={'flex': '0 0 auto'})
+                html.Label("Search by Job ID:", style={'fontWeight': 'bold', 'fontSize': '0.9rem', 'whiteSpace': 'nowrap'}),
+                dcc.Input(
+                    id='queue-search-input',
+                    type='text',
+                    placeholder='e.g., 6-sad-squid-snuggle-softly',
+                    style={'width': '280px', 'padding': '8px', 'borderRadius': '4px', 'border': '1px solid #ccc', 'fontSize': '0.9rem'}
+                ),
+                html.Label("Status Filter:", style={'fontWeight': 'bold', 'fontSize': '0.9rem', 'whiteSpace': 'nowrap'}),
+                dcc.Dropdown(
+                    id='queue-status-filter',
+                    options=[
+                        {'label': 'All Jobs', 'value': 'all'},
+                        {'label': 'Pending', 'value': 'pending'},
+                        {'label': 'Queued', 'value': 'queued'},
+                        {'label': 'Running', 'value': 'running'},
+                        {'label': 'Completed', 'value': 'completed'},
+                        {'label': 'Failed', 'value': 'failed'},
+                        {'label': 'Cancelled', 'value': 'cancelled'}
+                    ],
+                    value='all',
+                    style={'fontSize': '0.9rem', 'width': '160px'}
+                ),
+                html.Button(
+                    [html.I(className="fas fa-sync", style={'marginRight': '8px'}), "Refresh Queue"],
+                    id="queue-refresh-btn",
+                    style={
+                        'fontSize': '0.9rem',
+                        'padding': '8px 16px',
+                        'backgroundColor': 'rgba(90, 122, 96, 0.1)',
+                        'color': '#5A7A60',
+                        'border': '1px solid rgba(90, 122, 96, 0.3)',
+                        'borderRadius': '5px',
+                        'fontWeight': '500',
+                        'cursor': 'pointer',
+                        'whiteSpace': 'nowrap'
+                    }
+                ),
             ], style={
                 'display': 'flex',
-                'alignItems': 'flex-start',
-                'gap': '20px',
+                'alignItems': 'center',
+                'justifyContent': 'center',
+                'gap': '12px',
                 'marginBottom': '20px',
-                'flexWrap': 'wrap'
             }),
             
             # Jobs table
@@ -3072,9 +3135,10 @@ app.layout = html.Div([
 )
 def display_page(pathname, url_hash):
     """Handle URL routing for different pages."""
-    if callback_context.triggered and \
-       callback_context.triggered[0]['prop_id'] == 'url.hash':
-        return dash.no_update
+    if callback_context.triggered:
+        triggered_props = {t['prop_id'] for t in callback_context.triggered}
+        if triggered_props == {'url.hash'}:
+            return dash.no_update
     logger.info(f"display_page called with pathname: {repr(pathname)}")
     
     # Normalize pathname - strip trailing slashes for consistent matching
@@ -3121,19 +3185,19 @@ def display_page(pathname, url_hash):
             
             html.Div([
                 create_header(),
-                html.Div([
+                html.Div([html.Div([
                     html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
                     "This website is free and open to all users and there is no login requirement."
                 ], style={
+                    'display': 'inline-block',
                     'textAlign': 'center',
                     'padding': '12px 20px',
                     'backgroundColor': 'rgba(90, 122, 96, 0.08)',
                     'color': '#5A7A60',
                     'borderRadius': '8px',
                     'fontSize': '0.95rem',
-                    'marginBottom': '15px',
                     'border': '1px solid rgba(90, 122, 96, 0.15)'
-                }),
+                })], style={'textAlign': 'center', 'marginBottom': '15px'}),
                 create_input_mode_selector(),
                 create_file_upload_section(),
                 create_submit_section(),
@@ -3973,104 +4037,11 @@ def toggle_parameters(n_clicks, current_style):
 @app.callback(
     Output('example-data-section', 'children'),
     [Input('input-mode-selector', 'value')],
-    prevent_initial_call=False
+    prevent_initial_call=True
 )
 def update_example_data_section(input_mode):
     """Update example data section based on selected mode."""
-    mode = input_mode or 'trajectory'
-
-    # Determine availability and path for current mode
-    if mode == 'ensemble':
-        data_available = EXAMPLE_DATA_ENSEMBLE_AVAILABLE
-        example_path = config.example_data_path_ensemble
-        mode_label = "Ensemble"
-    else:
-        data_available = EXAMPLE_DATA_TRAJECTORY_AVAILABLE
-        example_path = config.example_data_path_trajectory
-        mode_label = "Trajectory"
-
-    # Build the results buttons - one per configured example slot
-    _example_buttons = []
-    if EXAMPLE_RESULTS1_AVAILABLE:
-        _col = "col-6" if EXAMPLE_RESULTS2_AVAILABLE else "col-12"
-        _example_buttons.append(html.Div([
-            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
-                    "Protein Only Example Results"],
-                   href="/dashboard/example-results-1", target="_blank",
-                   className="btn btn-outline-info btn-sm",
-                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
-                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
-        ], className=_col))
-    if EXAMPLE_RESULTS2_AVAILABLE:
-        _col = "col-6" if EXAMPLE_RESULTS1_AVAILABLE else "col-12"
-        _example_buttons.append(html.Div([
-            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
-                    "Protein+Ligand Example Results"],
-                   href="/dashboard/example-results-2", target="_blank",
-                   className="btn btn-outline-info btn-sm",
-                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
-                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
-        ], className=_col))
-    results_button = html.Div(
-        html.Div(_example_buttons, className="row g-2"),
-        style={'marginTop': '8px'}
-    ) if _example_buttons else html.Div()
-
-    if not data_available:
-        # No example input data - still show results button if available,
-        # but keep the hidden load-example-data-btn for callback compatibility
-        if EXAMPLE_RESULTS1_AVAILABLE or EXAMPLE_RESULTS2_AVAILABLE:
-            return html.Div([
-                html.Div(id="load-example-data-btn", style={'display': 'none'}),
-                results_button
-            ])
-        return html.Div(id="load-example-data-btn", style={'display': 'none'})
-
-    # Get list of files and calculate total size
-    example_files = _get_example_files(example_path)
-    total_size_bytes = 0
-    for filename in example_files:
-        file_path = os.path.join(example_path, filename)
-        if os.path.exists(file_path):
-            total_size_bytes += os.path.getsize(file_path)
-    total_size_mb = total_size_bytes / (1024 * 1024)
-
-    return html.Div([
-        # Load Example Data button
-        html.Div([
-            html.Button([
-                html.I(className="fas fa-flask", style={'marginRight': '8px'}),
-                f"Load {mode_label} Example Data"
-            ],
-            id="load-example-data-btn",
-            className="btn btn-outline-info btn-sm",
-            style={
-                'width': '100%',
-                'marginTop': '10px',
-                'padding': '8px 16px',
-                'fontSize': '0.85rem'
-            })
-        ], style={'textAlign': 'center'}),
-
-        # Download zip link
-        html.Div([
-            html.A([
-                html.I(className="fas fa-file-archive", style={'marginRight': '6px'}),
-                f"Download example files ({total_size_mb:.1f} MB)"
-            ],
-            href=f"/download-example/{mode}",
-            target="_blank",
-            style={
-                'display': 'inline-block',
-                'fontSize': '0.8rem',
-                'color': '#5A7A60',
-                'textDecoration': 'none',
-                'marginTop': '8px'
-            })
-        ], style={'textAlign': 'center'}) if example_files else html.Div(),
-
-        results_button
-    ])
+    return _build_example_data_section(input_mode or 'trajectory')
 
 
 @app.callback(
