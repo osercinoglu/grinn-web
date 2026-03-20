@@ -3302,7 +3302,7 @@ def update_mode_instructions(mode):
                     html.I(className="fas fa-info-circle", style={'marginRight': '6px', 'color': '#fd7e14'}),
                     html.Strong("Data Preparation: ", style={'color': '#854d00'}),
                     html.Span("Atom numbers in your structure (.pdb/.gro) and topology (.top) files must match. ", style={'color': '#854d00'}),
-                    html.A("See data preparation guide", href="/help#34-preparing-input-data-for-trajectory-mode", target="_blank", 
+                    html.A("See data preparation guide", href="/help#3.4-preparing-input-data-for-trajectory-mode", target="_blank", 
                            style={'color': '#0056b3', 'textDecoration': 'underline'}),
                     html.Span(" for instructions.", style={'color': '#854d00'})
                 ], style={
