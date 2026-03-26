@@ -109,7 +109,7 @@ Ensemble mode accepts a single multi-model PDB file, such as an NMR ensemble or 
 
 #### 1.2 Upload Input Files
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 13.16.35.png" width="50%"/>
+  <img src="/assets/docs/tutorial_fig1_submit_job.png" width="50%"/>
 </p>
 
 > **Figure 1:** The Submit Job page. Navigation bar at top; Analysis Mode radio buttons; file upload area with size-limit labels; Load Example Data button; GROMACS version dropdown.
@@ -128,7 +128,7 @@ Once files are uploaded, they appear in a list below the upload area. The server
 
 #### 1.3 Advanced Parameters
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 13.22.52.png" width="50%"/>
+  <img src="/assets/docs/tutorial_fig2_advanced_params.png" width="50%"/>
 </p>
 
 > **Figure 2:** Advanced Parameters collapsible panel expanded, showing parameter inputs and the Submit Job button with public/private toggle below.
@@ -166,7 +166,7 @@ After submitting a job, the browser automatically redirects to the **Job Detail*
 
 #### 2.1 Progress Bar and Job Logs
 <p align="center">
-  <img src="image.png" width="90%"/>
+  <img src="/assets/docs/tutorial_fig3_job_detail.png" width="90%"/>
 </p>
 
 > **Figure 3:** Job Detail page shown in two states: left panel shows job running at ~25% progress; right panel shows the same job completed at 100% with Save Results and Launch Dashboard buttons visible.
@@ -237,7 +237,7 @@ The **Job Queue** page, accessible from the navigation bar at the top of every p
 
 #### 3.1 Job Status Overview
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 13.42.29.png" width="50%"/>
+  <img src="/assets/docs/tutorial_fig4_job_queue.png" width="50%"/>
 </p>
 
 > **Figure 4:** Job Queue page showing a table of jobs with status badges (RUNNING, COMPLETED, EXPIRED), Job IDs, creation times, and filter controls at the top.
@@ -277,12 +277,12 @@ Click **Launch Dashboard** from the Job Detail page to open the interactive visu
 
 #### 4.1 Pairwise Interaction Energy
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 14.06.30.png" width="90%"/>
+  <img src="/assets/docs/tutorial_fig5_pairwise_energies.png" width="90%"/>
 </p>
 > **Figure 5:**  Pairwise Energies tab showing the full layout: residue selection lists on the left, three stacked time-series plots (Total, vdW, Electrostatic) in the center, and the 3D Viewer panel on the right.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 14.09.03.png" width="40%"/>
+  <img src="/assets/docs/tutorial_fig6_pairwise_selection.png" width="40%"/>
 </p>
 
 > **Figure 6:** Pairwise Energies tab with a residue pair selected. Red diamond marker on the time-series plots indicates the current frame. The 3D Viewer shows the selected residues highlighted in green.
@@ -314,7 +314,7 @@ Residues are labeled using the convention `ResidueNameResidueNumber_ChainID`. Fo
 
 #### 4.2 Interaction Energy Matrix
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 14.10.57.png" width="90%"/>
+  <img src="/assets/docs/tutorial_fig7_energy_matrix.png" width="90%"/>
 </p>
 
 > **Figure 7:** Interaction Energy Matrix tab showing the full heatmap with color scale bar. Blue cells indicate attractive interactions; red cells indicate repulsive interactions. The energy type radio buttons (Total / Elec / VdW) are visible above the heatmap.
@@ -349,7 +349,7 @@ For LLM-assisted interpretation of these energies, see **Part II — gRINN Chatb
 
 A Protein Energy Network (PEN) represents the protein as a graph where residues are nodes and energetically significant interactions are edges. Edge weights are normalized average interaction energies (range [0, 1], attractive interactions favored). Edge distances equal 1 − weight, so shortest-path algorithms prefer stronger interactions — a shorter path distance corresponds to a more energetically favorable communication route through the network.
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 14.15.40.png" width="90%"/>
+  <img src="/assets/docs/tutorial_fig8_network_metrics.png" width="90%"/>
 </p>
 
 > **Figure 8:** Network Analysis tab with the Metrics sub-tab selected. Controls panel on the left shows energy type selector, edge cutoff slider, covalent bonds toggle, and Update Network button. The main area shows metric visualization plots.
@@ -459,7 +459,7 @@ The chatbot supports two distinct query types:
 2. **"✨ Explain biologically" pipeline** — after any chatbot response, a `✨ Explain biologically` button appears. Clicking it sends a summary of the last result, along with any UniProt annotations and PubMed-retrieved literature context you have configured, to the LLM for a scientifically grounded biological interpretation.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 14.26.35.png" width="90%"/>
+  <img src="/assets/docs/tutorial_figA1_chatbot_overview.png" width="90%"/>
 </p>
 
 > **Figure A.1:** The gRINN Dashboard with the chatbot panel open.
@@ -511,7 +511,7 @@ When the panel opens, the dashboard's main content area automatically reflows: t
 
 
 <p align="center">
-  <img src="image-22.png" width="20%"/>
+  <img src="/assets/docs/tutorial_figB1_chatbot_toggle.png" width="20%"/>
 </p>
 
 > **Figure B.1:** The Dashboard header bar showing the "💬 gRINN Chatbot" toggle button on the right side, with a callout arrow pointing to it. The rest of the header shows the gRINN logo/title and the results folder path label.
@@ -546,10 +546,9 @@ To return to the side-panel layout, click the `⤡` button that replaces `⤢` i
 
 > [!TIP]
 > Use the floating overlay when reviewing tables with many residue pairs or charts that require more horizontal space. The side-panel layout is convenient for keeping the chatbot alongside the 3D viewer while you work through a question interactively.
-<
 
 <p align="center">
-  <img src="image-23.png" width="90%"/>
+  <img src="/assets/docs/tutorial_figB2_chatbot_overlay.png" width="90%"/>
 </p>
 
 > **Figure B.2:** The gRINN Chatbot in its expanded floating overlay mode, centered on the screen with the dashboard visible but partially obscured behind it. The "⤡" collapse button is visible in the top-right corner of the overlay header. Resize handles are annotated at the right edge and bottom-right corner of the overlay.
@@ -578,7 +577,7 @@ In **side-panel mode** (the default, non-overlay layout), the chatbot column wid
 The **Settings panel** lives inside the gRINN Chatbot sidebar. Click the **⚙️ Settings ▼** toggle at the top of the chatbot body to expand or collapse it. All settings persist across page reloads within the same browser session.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 15.09.17.png" width="25%"/>
+  <img src="/assets/docs/tutorial_figC1_settings_panel.png" width="25%"/>
 </p>
 
 > **Figure C.1:** The gRINN Chatbot sidebar open with the Settings panel fully expanded, showing the Model dropdown, DataFrames multi-select, Residue filter, Protein context text area, UniProt ID(s) by chain inputs, Data mode radio buttons, and mode-specific controls. Callout arrows point to each labelled control.
@@ -693,7 +692,7 @@ Leave any chain blank to skip automatic retrieval for that chain. You can still 
 The **Data mode:** radio is always visible below the horizontal rule; the controls beneath it change depending on which mode is active.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 15.22.34.png" width="65%"/>
+  <img src="/assets/docs/tutorial_figC2_data_mode.png" width="65%"/>
 </p>
 
 >**Figure C.2:** The Data mode radio buttons selection
@@ -771,7 +770,7 @@ A hint line confirms the mode: *"Single frame sent to the AI. No stride or size 
 
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 15.29.57.png" width="55%"/>
+  <img src="/assets/docs/tutorial_figC3_snapshot_mode.png" width="55%"/>
 </p>
 
 > **Figure C.3:** The Settings panel with "Snapshot" mode selected
@@ -846,7 +845,7 @@ This text is prepended to every query, giving the model the structural vocabular
 **Step 7.** Click `⚙️ Settings ▼` again to collapse the settings panel and reclaim vertical space for the chat history.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 15.46.48.png" width="50%"/>
+  <img src="/assets/docs/tutorial_figD1_settings_configured.png" width="50%"/>
 </p>
 
 > **Figure D.1:** Settings panel fully configured: Protein context filled in, UniProt ID "P00720" for Chain A, "Metrics_Total_Cov_Cut1.0" selected, Data mode set to Summary.
@@ -873,7 +872,7 @@ In the T4 lysozyme (P00720) example dataset, the top-betweenness residues includ
 
 
 <p align="center">
-  <img src="image-10.png" width="90%"/>
+  <img src="/assets/docs/tutorial_figD2_betweenness_table.png" width="90%"/>
 </p>
 
 > **Figure D.2:** Top-10 betweenness centrality table returned by the chatbot. 
@@ -897,7 +896,7 @@ The key message is: **the network identified ASP10_A as a communication hub; Uni
 > The `✨ Explain biologically` button is most powerful when the UniProt ID is configured in the settings (Step 4 above) and the chatbot has already produced a response identifying specific residues. It uses whatever residues appeared in the last chatbot response as the focus of the annotation query. If the button is greyed out, check that a UniProt ID has been entered and that the last response contains residue names in the expected format (e.g., `ASP10_A`).
 
 <p align="center">
-  <img src="image-11.png" width="88%"/>
+  <img src="/assets/docs/tutorial_figD3_bio_interpretation.png" width="88%"/>
 </p>
 
 > **Figure D.3:** Biological interpretation generated from the hub table in Figure D.2.
@@ -917,7 +916,7 @@ This query asks the model to join two DataFrames — centrality metrics and pair
 > **On interpreting IE values in this context.** Here the IE data is used for **relative ranking within your dataset** — which hub residues are more energetically coupled than others — rather than as absolute thermodynamic quantities. This is the appropriate use of force-field pairwise energies; see [Section E.1](#e1-summary-mode--global-statistical-overview) for a fuller note on IE magnitude interpretation.
 
 <p align="center">
-  <img src="image-12.png" width="300"/>
+  <img src="/assets/docs/tutorial_figD4_centrality_energy.png" width="300"/>
 </p>
 
 > **Figure D.4:** Chatbot response showing a combined table of the top 10 residues ranked by average betweenness centrality alongside their summed total interaction energy (IE_Total). In this example, **ASP20_A** and **ILE3_A** are highlighted as residues exhibiting notable energetic coupling within the network.
@@ -995,7 +994,7 @@ Switch **Data mode** to **Timeseries** in the settings panel. In this mode the m
 With the residue filter active, the model has access to the complete 126-frame timeseries for the `GLU11_A`–`ARG14_A` pair. The expected response is a line plot with frames on the x-axis and interaction energy (kcal/mol) on the y-axis. In the T4 lysozyme example, the mean is approximately −49.6 kcal/mol; in your dataset the mean will reflect your own protein. The standard deviation and visual scatter of the line will tell you whether this contact is a stable hydrogen bond or a fluctuating interaction. Stable active-site contacts in well-folded proteins typically show a coefficient of variation below ~0.2; larger fluctuations warrant follow-up with Snapshot mode to identify the specific conformational states responsible.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 16.56.40.png" width="50%"/>
+  <img src="/assets/docs/tutorial_figE1_timeseries.png" width="50%"/>
 </p>
 
 > **Figure E.1:** Timeseries of interaction energy between GLU11_A and ARG14_A across simulation frames (0–125). The dashed horizontal line indicates the mean interaction energy (~−49.8 kcal/mol).
@@ -1032,7 +1031,7 @@ Snapshot mode is best for questions of the form "what does the interaction patte
 Frame 0 is the initial conformation of the simulation. Set the **Frame #** number to `0` in the snapshot settings, then send the query. The model returns a table of `ARG8_A`'s interaction partners sorted by total energy at that frame. Compare the returned rankings to the Summary mode averages: if the same pairs (`GLU5_A`, `ASN2_A`, `ILE3_A`, `MET1_A`) dominate in both views, the interaction pattern is structurally invariant over the trajectory. If a partner appears strongly only at frame 0, it may reflect a conformation present at the start of the simulation that relaxes as the protein equilibrates.
 
 <p align="center">
-  <img src="Ekran görüntüsü 21-03-2026 17.08.18.png" width="60%"/>
+  <img src="/assets/docs/tutorial_figE2_snapshot_arg8.png" width="60%"/>
 </p>
 
 > **Figure E.2:** Instantaneous interaction landscape for ARG8_A in Snapshot mode.
@@ -1056,7 +1055,7 @@ This prompt combines quantitative filtering with structural classification. The 
 > The chatbot does not have direct access to secondary structure assignments from the PDB file. Its secondary structure groupings for Snapshot queries rely on the protein context you typed in the settings and any structural knowledge of T4 lysozyme from its training data. For authoritative secondary structure annotation, use the Mol* viewer alongside the chatbot: navigate to the relevant residues in 3D while reading the chatbot's tabular output.
 
 <p align="center">
-<img src="image-14.png" width="300"/>
+<img src="/assets/docs/tutorial_figE3_snapshot_response.png" width="300"/>
 </p>
 
 > **Figure E.3:** Snapshot mode response showing residue pairs with strong interactions
@@ -1117,14 +1116,14 @@ The dashboard inspects the most recent assistant message to determine its result
 4. **Formatted output.** The model's interpretation is appended to the chat as a new assistant message headed **"Biological interpretation:"**, followed by a **"📚 References:"** footer that lists each paper as `PMID NNNNN: Title`.
 
 <p align="center">
-  <img src="image-16.png" width="50%"/>
+  <img src="/assets/docs/tutorial_figF1_explain_btn.png" width="50%"/>
 </p>
 
 > **Figure F.1:** SCREENSHOT: The `✨ Explain biologically` button visible below the chat window after a successful query response.
 
 
 <p align="center">
-  <img src="image-20.png" width="50%"/>
+  <img src="/assets/docs/tutorial_figF2_bio_output.png" width="50%"/>
 </p>
 
 > **Figure F.2:** Biological interpretation generated using the *Explain biologically* feature. The response integrates betweenness centrality analysis with UniProt annotations and literature evidence (PMIDs), producing a mechanistic explanation of key residues involved in structural communication, domain coupling, and protein function in T4 lysozyme.
@@ -1191,7 +1190,7 @@ The exact strings produced by the dashboard code are:
 | No budget set | `Tokens: X / ∞` | Grey (default text color) |
 
 <p align="center">
-  <img src="image-21.png" width="90%"/>
+  <img src="/assets/docs/tutorial_figG1_token_counter.png" width="90%"/>
 </p>
 
 > **Figure G.1:** [SCREENSHOT: Token counter in three states — normal grey, yellow warning, and red EXCEEDED — shown in the chatbot header bar.]
