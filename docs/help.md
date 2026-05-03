@@ -64,6 +64,8 @@ For analyzing molecular dynamics simulation trajectories generated with GROMACS:
 - `.itp` files: Include topology files (force field parameters)
 - `.zip` files: Compressed force field folders
 
+> **Note:** mmCIF (`.cif` / `.mmcif`) is not supported. The underlying GROMACS engine reads only legacy PDB. Convert to PDB first (e.g. `gemmi convert in.cif out.pdb`, or in PyMOL `save out.pdb`).
+
 ### 3.2 Ensemble Mode
 
 For analyzing conformational ensembles stored in multi-model PDB files.
@@ -75,6 +77,8 @@ For analyzing conformational ensembles stored in multi-model PDB files.
 | Ensemble PDB | `.pdb` | Multi-model PDB file with MODEL/ENDMDL records |
 
 The PDB file should contain multiple conformations separated by `MODEL` and `ENDMDL` records. Each model represents a different conformational state of the protein.
+
+> **Note:** mmCIF (`.cif` / `.mmcif`) is not supported. Convert to PDB first (e.g. `gemmi convert in.cif out.pdb`, or in PyMOL `save out.pdb`).
 
 ### 3.3 File Size Limits
 
@@ -110,6 +114,33 @@ echo "Protein" | gmx trjconv -f md.xtc -s md.tpr -o protein.xtc -n protein.ndx
 gmx pdb2gmx -f protein.gro -o protein_processed.gro -p protein.top -water none
 # Alternatively, you may also opt to remove unnecessary molecules from the end of your topology file. 
 ```
+
+### 3.5 Ligand and Cofactor Support
+
+Whether an entity becomes a residue node in the interaction-energy matrix depends on the analysis mode and, for Trajectory mode, on the topology you upload.
+
+| Entity | Trajectory mode | Ensemble mode | PEN node? | Notes |
+|---|---|---|---|---|
+| Standard amino acid residue | ✓ | ✓ | ✓ | Always supported in both modes. |
+| Nucleic acid residue | ✓ | ✗ | ✓ | Trajectory mode only — the `pdb2gmx` ensemble path does not support nucleic acids in the default workflow. |
+| Small-molecule ligand / cofactor (HETATM) | ✓ (if topology includes it) | ✗ | ✓ | The uploaded `.top` must `#include` the ligand's `.itp` and list it in the `[ molecules ]` section. Pairs involving an unparameterized residue are excluded from the energy calculation. |
+| Modified / non-standard amino acid | ✓ (if topology includes it) | ✗ | ✓ | Same constraint as a small-molecule ligand — user-supplied force-field parameters required. |
+| Common ion (Na⁺, Cl⁻, K⁺, Mg²⁺, Ca²⁺, Zn²⁺, Fe) | ✗ by default | ✗ | ✗ | Excluded by name. Re-include by overriding the **Source / Target Selection** fields in [Advanced Parameters](#42-advanced-parameters) — e.g. `protein or resname ZN` — at your own risk. Other metals (e.g. Mn, Cu, Ni) are not on the exclusion list and are treated as regular residues. |
+| Water (HOH / SOL) | ✗ | ✗ | ✗ | Always excluded. |
+| Lipid | ✓ (if topology includes it) | ✗ | ✓ | Treated like any other non-standard residue. |
+
+- **No separate cap on ligand count.** A system with several ligands is supported as long as each appears in the topology. Total system size is bounded by the existing 100 MB trajectory / 10 MB structure / 200 frame upload limits (see [3.3 File Size Limits](#33-file-size-limits)).
+- **Missing ligand parameters.** If the uploaded topology omits a residue's parameters, the pre-flight check flags it and the affected pairs are zeroed in the IE matrix.
+
+### 3.6 Non-Standard Residues in Trajectory Mode
+
+gRINN performs no automatic detection, parameterization, or repair of non-standard residues. It reads whatever you have placed in the uploaded `.top` and `.itp` files. The tool assumes that any user with a trajectory containing non-standard residues already has the corresponding parameters in their topology — either as a custom force field or as supplementary `.itp` files paired with a standard one. Generating those parameters is out of scope for i-gRINN.
+
+The `.top` typically uses `#include` directives for `.itp` files that define the non-standard residue (atom types, bonded terms, partial charges). Upload **every** such file alongside the `.top`. The pre-flight check parses the `#include` directives and fails the job early with a clear error if any are missing; pairs involving an unparameterized residue are also excluded from the IE matrix.
+
+After analysis completes, non-standard residues appear in the **interaction-energy matrix**, the **PEN node list**, the **dashboard residue selectors**, and the **gRINN Chatbot** pair listings under their `resname` (for example `ATP301_B`, `HEM199_A`, `STA300_A`). They are treated identically to standard amino-acid residues in the underlying calculation; no special casing exists in the IE pipeline. There is no separate "ligand" output channel — they are simply nodes.
+
+Ensemble mode does not support non-standard residues at all (the `pdb2gmx` topology generator handles only the standard 20 amino acids). Non-standard residues must therefore be analysed via Trajectory mode with a user-supplied topology — see [3.5 Ligand and Cofactor Support](#35-ligand-and-cofactor-support) for the full support matrix.
 
 ---
 

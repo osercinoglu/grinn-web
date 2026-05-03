@@ -91,6 +91,9 @@ Trajectory mode is designed for standard molecular dynamics simulations. It requ
 > [!WARNING]
 > If your .top file uses `#include` directives for additional files, upload those files too — missing includes will cause job failures.
 
+> [!NOTE]
+> See the **Help** page, section *3.6 Non-Standard Residues in Trajectory Mode*, for details on how non-standard residues are read from your topology and how they appear in the analysis outputs.
+
 If your simulation used a custom force field, you can upload the force field directory as a .zip archive. The .zip should contain the force field directory at its top level (e.g., `myff.ff/`), and the server will make it available to GROMACS during topology processing.
 
 > [!NOTE]
@@ -104,6 +107,9 @@ Ensemble mode accepts a single multi-model PDB file, such as an NMR ensemble or 
 
 > [!WARNING]
 > Non-standard residues (small molecules, cofactors, modified amino acids) are not supported in Ensemble mode. The automatic topology generation via `pdb2gmx` can only handle standard protein residues.
+
+> [!NOTE]
+> For a full support matrix covering ligands, cofactors, modified residues, metal ions, water, and lipids — including which entities become PEN nodes and how to re-include excluded ions — see the **Help** page, section *3.5 Ligand and Cofactor Support*.
 
 ---
 
@@ -157,6 +163,9 @@ After the job is submitted, a confirmation banner appears on the page displaying
 
 > [!TIP]
 > Bookmark the monitoring URL immediately — it is the only way to return to a private job's results. Private jobs are not listed anywhere in the interface; the monitoring URL is the sole access point for your results.
+
+> [!NOTE]
+> **Optional email notification.** You may enter an email address in the field below the submit button to receive a single message when your job finishes (whether it succeeded or failed). The notification includes the job ID, your input file names, and a link to the monitoring page (and dashboard, on success). The address is stored only with the job record and is deleted alongside the job after the standard 72-hour retention window. Notifications are sent from `noreply.grinn@bio-cloud.site` and cannot receive replies. Leaving the field blank disables the notification — no email is sent.
 
 ### 2. Monitoring Your Job
 
@@ -385,7 +394,7 @@ The Metrics sub-tab computes and visualizes graph-theoretic properties of the PE
 
 The **Heatmap** layout maps residues along one axis and trajectory frames along the other, making it straightforward to detect residues whose centrality fluctuates with conformational change. The **Violin** layout collapses the temporal dimension into a distribution summary, which is useful for identifying residues that consistently rank high across the entire trajectory.
 
-**Step 3:** Refine the residue display using the sorting, filtering, and range controls. Use the **Sort** dropdown to order residues by **Sequence Order**, **Ascending** metric value, or **Descending** metric value — select **Descending** to surface the highest-ranking residues at the top of the visualization. Use the **Filter Residues** autocomplete field to focus on a specific subset of residues by name or number. Use the **Min–Max range sliders** to narrow the display to a particular window of metric values or trajectory frames, reducing visual clutter when working with large systems.
+**Step 3:** Refine the residue display using the sorting, filtering, and range controls. Use the **Sort** dropdown to order residues by **Sequence Order**, **Ascending** metric value, or **Descending** metric value — select **Descending** to surface the highest-ranking residues at the top of the visualization. A fourth option, **Cluster (similar profiles)**, performs hierarchical clustering on the residues' centrality timeseries (correlation distance, average linkage) and renders a dendrogram alongside the heatmap so similar-profile residues group into visually obvious blocks; useful when looking for residue communities that gain or lose centrality together across the trajectory. Use the **Filter Residues** autocomplete field to focus on a specific subset of residues by name or number. Use the **Min–Max range sliders** to narrow the display to a particular window of metric values or trajectory frames, reducing visual clutter when working with large systems.
 
 **Step 4:** Adjust the network threshold using the **Edge Addition Energy Cutoff** slider to control the stringency of edge inclusion, then click **Update Network** to rebuild the graph. The cutoff you choose directly affects which residues appear as hubs or bridges.
 
@@ -495,6 +504,7 @@ The chatbot supports two distinct query types:
 > - **No job control.** The chatbot cannot submit new jobs, modify analysis parameters, re-run calculations, or access external databases directly. UniProt and PubMed lookups occur only as part of the `✨ Explain biologically` pipeline, and only when you have entered UniProt accession IDs in the Settings panel.
 > - **Execution time limit.** LLM-generated code runs inside the dashboard container. Complex or long-running computations will time out after 120 seconds and return an error.
 > - **Token budget.** Each dashboard session has a configurable token budget. When the budget is exhausted, further queries are blocked until you refresh the page to start a new session.
+> - **`✨ Explain biologically` is a hypothesis aid, not a conclusion.** The button generates a narrative interpretation by combining your finite-frame analysis with UniProt/PubMed context via an LLM. The output is intended to surface candidate hypotheses for follow-up — not biological conclusions. Always validate against the primary literature, replicate simulations, and experimental data before citing or quoting it.
 
 ---
 

@@ -28,6 +28,7 @@ from shared.config import get_config, setup_logging
 from shared.local_storage import get_storage_manager
 from shared.worker_registry import WorkerRegistry, get_worker_registry, generate_registration_token
 from shared.database import DatabaseManager, JobModel, JobStatus as DBJobStatus
+from shared.pdb_validation import MMCIF_NOT_SUPPORTED_ERROR
 import redis
 
 # Import Celery tasks
@@ -440,6 +441,13 @@ def upload_job_file(job_id: str):
         content_length = request.content_length
 
         lower_name = filename.lower()
+
+        # R1.f — reject mmCIF uploads at the API boundary (defense-in-depth in
+        # case the frontend gate is bypassed). Applies regardless of input_mode.
+        if lower_name.endswith('.cif') or lower_name.endswith('.mmcif'):
+            logger.info(f"Rejecting mmCIF upload: {filename}")
+            return jsonify({'error': MMCIF_NOT_SUPPORTED_ERROR}), 400
+
         is_trajectory = lower_name.endswith('.xtc') or lower_name.endswith('.trr')
         is_ensemble_pdb = (job_input_mode == 'ensemble' and lower_name.endswith('.pdb'))
         use_trajectory_limit = is_trajectory or is_ensemble_pdb

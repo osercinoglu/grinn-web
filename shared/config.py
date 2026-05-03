@@ -133,6 +133,16 @@ class Config:
     
     # Frontend base URL for constructing full URLs (e.g., for bookmark links)
     frontend_base_url: Optional[str] = None  # e.g., "https://grinn.example.com"
+
+    # Email notifications (R1.c) — SMTP relay via an existing mailbox
+    # (e.g. noreply.grinn@bio-cloud.site through Google Workspace / Zoho /
+    # Fastmail / etc.). Leaving smtp_host blank disables the feature
+    # entirely; the helper short-circuits on missing config or recipient.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_addr: str = "gRINN <noreply.grinn@bio-cloud.site>"
     
     def _get_default_storage_path(self) -> str:
         """Get default storage path based on environment."""
@@ -305,7 +315,17 @@ class Config:
 
         # Frontend base URL for bookmark links
         self.frontend_base_url = os.getenv("FRONTEND_BASE_URL", self.frontend_base_url)
-        
+
+        # Email notifications (R1.c) — opt-in, SMTP via existing mailbox
+        self.smtp_host = os.getenv("SMTP_HOST", self.smtp_host)
+        try:
+            self.smtp_port = int(os.getenv("SMTP_PORT", str(self.smtp_port)))
+        except ValueError:
+            logging.warning(f"Invalid SMTP_PORT value: {os.getenv('SMTP_PORT')}. Using default: {self.smtp_port}")
+        self.smtp_user = os.getenv("SMTP_USER", self.smtp_user)
+        self.smtp_password = os.getenv("SMTP_PASSWORD", self.smtp_password)
+        self.smtp_from_addr = os.getenv("SMTP_FROM_ADDR", self.smtp_from_addr)
+
         # Default GROMACS version for dropdown selection
         self.default_gromacs_version = os.getenv("DEFAULT_GROMACS_VERSION", self.default_gromacs_version)
         

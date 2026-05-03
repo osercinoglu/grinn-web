@@ -27,6 +27,11 @@ from flask import send_file, abort
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
 from models import Job, JobStatus, JobParameters, FileType, JobSubmissionRequest
 from config import get_config, setup_logging
+from pdb_validation import (  # noqa: F401
+    validate_pdb_multimodel,
+    ENSEMBLE_SINGLE_STRUCTURE_ERROR,
+    MMCIF_NOT_SUPPORTED_ERROR,
+)
 
 # Setup logging
 setup_logging()
@@ -185,71 +190,6 @@ def cleanup_session_files(session_id: str):
             logger.info(f"Cleaned up session directory: {session_dir}")
     except Exception as e:
         logger.error(f"Error cleaning up session {session_id}: {e}")
-
-def validate_pdb_multimodel(file_path: str, input_mode: str) -> dict:
-    """
-    Validate PDB file for multi-model content (ensemble mode).
-    
-    Args:
-        file_path: Path to the PDB file
-        input_mode: Current input mode ('ensemble' or 'trajectory')
-        
-    Returns:
-        dict with keys:
-        - 'model_count': int (number of MODEL records found)
-        - 'is_multimodel': bool
-        - 'warning': str or None
-        - 'error': str or None
-    """
-    result = {
-        'model_count': 0,
-        'is_multimodel': False,
-        'warning': None,
-        'error': None
-    }
-    
-    try:
-        with open(file_path, 'r') as f:
-            model_count = 0
-            endmdl_count = 0
-            has_atom_records = False
-            
-            for line in f:
-                record_type = line[:6].strip()
-                if record_type == 'MODEL':
-                    model_count += 1
-                elif record_type == 'ENDMDL':
-                    endmdl_count += 1
-                elif record_type in ('ATOM', 'HETATM'):
-                    has_atom_records = True
-            
-            result['model_count'] = model_count
-            result['is_multimodel'] = model_count > 1
-            
-            # Validation checks
-            if model_count > 0 and model_count != endmdl_count:
-                result['error'] = f"Mismatched MODEL/ENDMDL records ({model_count} MODEL vs {endmdl_count} ENDMDL)"
-                return result
-            
-            if input_mode == 'ensemble':
-                if model_count == 0:
-                    # Single-model PDB without explicit MODEL records
-                    if has_atom_records:
-                        result['warning'] = "PDB has no MODEL records - will be treated as single structure. Ensemble analysis requires multiple conformations."
-                        result['model_count'] = 1
-                    else:
-                        result['error'] = "PDB file contains no atom coordinates"
-                elif model_count == 1:
-                    result['warning'] = "PDB contains only 1 model. Ensemble analysis requires multiple conformations for meaningful results."
-                else:
-                    # Check against max_frames limit
-                    if config.max_frames and model_count > config.max_frames:
-                        result['error'] = f"PDB has {model_count} models, which exceeds the limit of {config.max_frames}"
-                    
-    except Exception as e:
-        result['error'] = f"Failed to parse PDB file: {str(e)}"
-    
-    return result
 
 def get_file_purpose(file_type: str, mode: str = 'trajectory') -> str:
     """
@@ -728,7 +668,7 @@ HELP_PAGES = read_help_content()
 
 
 # Initialize Dash app
-app = Dash(__name__, 
+app = Dash(__name__,
           external_stylesheets=[
               dbc.themes.BOOTSTRAP,
               "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css",
@@ -737,6 +677,11 @@ app = Dash(__name__,
           external_scripts=[
               "https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"
           ],
+          # R1.a — declare a device-width viewport so browsers (especially on
+          # HiDPI laptop panels with OS scaling) lay out at the actual screen
+          # CSS-px width instead of the ~980px virtual desktop fallback that
+          # produces the "tiny text + crushed layout" symptom referees see.
+          meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
           title="gRINN Web Service",
           suppress_callback_exceptions=True)
 
@@ -2439,9 +2384,28 @@ def create_submit_section():
                         style={'display': 'inline-block'}
                     ),
                     html.Div([
-                        html.Small("Jobs are private by default. Bookmark your job monitoring page to track progress.", 
+                        html.Small("Jobs are private by default. Bookmark your job monitoring page to track progress.",
                                   style={'color': '#8A9A8A', 'fontSize': '0.8rem'})
-                    ], style={'marginTop': '4px'})
+                    ], style={'marginTop': '4px'}),
+                    # R1.c — Optional completion-notification email
+                    html.Div([
+                        dcc.Input(
+                            id="user-email-input",
+                            type="email",
+                            placeholder="(optional) email for completion notification",
+                            debounce=True,
+                            value="",
+                            className="form-input",
+                            style={'width': '100%', 'maxWidth': '360px', 'fontSize': '0.85rem'}
+                        ),
+                        html.Div([
+                            html.Small(
+                                "We'll send one message when your job finishes (success or failure). "
+                                "Stored with the job and deleted with it after the 72-hour retention window.",
+                                style={'color': '#8A9A8A', 'fontSize': '0.75rem'}
+                            )
+                        ], style={'marginTop': '4px'})
+                    ], style={'marginTop': '10px'})
                 ], style={'marginTop': '10px', 'textAlign': 'center'})
             ], style={'flex': '1', 'paddingLeft': '15px'})
         ], style={'display': 'flex', 'gap': '15px', 'alignItems': 'flex-start', 'marginBottom': '15px'}),
@@ -3152,6 +3116,7 @@ def display_page(pathname, url_hash):
         # Main page
         return html.Div([
             dcc.Store(id='uploaded-files-store', data=[]),
+            dcc.Store(id='upload-rejection-store', storage_type='memory', data=None),
             dcc.Store(id='file-role-conflicts', data={'structure': [], 'topology': []}),
             dcc.Store(id='session-id-store', data=session_id),  # Session ID for temp file storage
             dcc.Store(id='gromacs-versions-store', data=None),  # Store for available GROMACS versions
@@ -3488,7 +3453,8 @@ def update_file_size_limits_info(mode):
      Output('upload-progress-container', 'style'),
      Output('upload-progress-text', 'children'),
      Output('upload-progress-bar', 'value'),
-     Output('file-rejection-warning', 'children')],
+     Output('file-rejection-warning', 'children'),
+     Output('upload-rejection-store', 'data')],
     [Input('upload-files', 'contents'),
      Input('input-mode-selector', 'value')],
     [State('upload-files', 'filename'),
@@ -3510,31 +3476,34 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
     # Check what triggered this callback
     triggered_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
     
-    # If mode changed (not a file upload), let update_file_display_on_removal handle it
+    # If mode changed (not a file upload), let update_file_display_on_removal handle it.
+    # Mode change clears any prior rejection (different mode = different validation rules).
     if triggered_id == 'input-mode-selector':
         return (no_update, no_update, no_update, no_update, no_update, no_update,
-                no_update, no_update, no_update, no_update, no_update)
-    
+                no_update, no_update, no_update, no_update, no_update, None)
+
     if not contents:
         # If there are already stored files, do not touch outputs here.
         # The UI should be driven by `uploaded-files-store` and updated via
-        # `update_file_display_on_removal`.
+        # `update_file_display_on_removal`. Clear the rejection: arriving here with
+        # contents=None typically means the trash flow just cleared upload-files.contents,
+        # which is a deliberate file-state action.
         if stored_files:
             return (no_update, no_update, no_update, no_update, no_update, no_update,
-                    no_update, no_update, no_update, no_update, no_update)
+                    no_update, no_update, no_update, no_update, no_update, None)
 
         return [], {'display': 'none'}, [], stored_files, True, [
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
             "Upload required files to enable analysis"
         ], {
-            'color': '#8A9A8A', 
+            'color': '#8A9A8A',
             'fontSize': '0.9rem',
             'textAlign': 'center',
             'padding': '10px',
             'backgroundColor': '#f8f9fa',
             'borderRadius': '5px',
             'border': '1px dashed #dee2e6'
-        }, progress_hidden, '', 0, []  # Empty rejection warning
+        }, progress_hidden, '', 0, [], None  # Empty rejection warning + clear rejection store
     
     if not isinstance(contents, list):
         contents = [contents]
@@ -3547,6 +3516,7 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
     files = stored_files.copy() if stored_files else []
     validation_messages = []
     rejected_files = []  # Track files rejected for size
+    rejection_data = None  # PDB-validation rejection persisted for sticky display
     # Safety cap to avoid excessive memory usage during base64 decode (derived from configured limits)
     hard_limit_mb = max(config.max_trajectory_file_size_mb, config.max_other_file_size_mb)
     HARD_FILE_SIZE_LIMIT = hard_limit_mb * 1024 * 1024
@@ -3569,6 +3539,21 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
         
         # Determine file type first
         extension = filename.lower().split('.')[-1] if '.' in filename else ''
+
+        # R1.f — reject mmCIF uploads with a specific actionable message
+        # before falling through to the generic "Unsupported file type"
+        # branch. Applies in both Trajectory and Ensemble mode because the
+        # underlying GROMACS engine reads only legacy PDB.
+        if extension in ('cif', 'mmcif'):
+            rejection_data = {'filename': filename, 'message': MMCIF_NOT_SUPPORTED_ERROR}
+            validation_messages.append(
+                html.Div([
+                    html.I(className="fas fa-times-circle", style={'marginRight': '8px'}),
+                    f"{filename}: {MMCIF_NOT_SUPPORTED_ERROR}"
+                ], className="alert alert-danger")
+            )
+            continue
+
         try:
             file_type = FileType(extension)
         except ValueError:
@@ -3648,6 +3633,10 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
             pdb_validation = validate_pdb_multimodel(temp_path, input_mode)
             
             if pdb_validation['error']:
+                rejection_data = {
+                    'filename': filename,
+                    'message': pdb_validation['error'],
+                }
                 validation_messages.append(
                     html.Div([
                         html.I(className="fas fa-times-circle", style={'marginRight': '8px'}),
@@ -3993,7 +3982,7 @@ def handle_file_upload(contents, input_mode, filenames, stored_files, session_id
             'border': '2px solid #f5c6cb'
         })
     
-    return file_list_container, style, validation_messages, files, submit_disabled, submit_message, submit_style, progress_style, progress_text, 100, rejection_warning
+    return file_list_container, style, validation_messages, files, submit_disabled, submit_message, submit_style, progress_style, progress_text, 100, rejection_warning, rejection_data
 
 @app.callback(
     [Output('parameters-content', 'style'),
@@ -4100,7 +4089,8 @@ app.clientside_callback(
 @app.callback(
     [Output('uploaded-files-store', 'data', allow_duplicate=True),
      Output('file-rejection-warning', 'children', allow_duplicate=True),
-     Output('privacy-setting', 'value', allow_duplicate=True)],
+     Output('privacy-setting', 'value', allow_duplicate=True),
+     Output('upload-rejection-store', 'data', allow_duplicate=True)],
     [Input('confirm-load-example-btn', 'n_clicks')],
     [State('session-id-store', 'data'),
      State('input-mode-selector', 'value')],
@@ -4126,7 +4116,7 @@ def load_example_data(n_clicks, session_id, input_mode):
         example_data_dir = config.example_data_path_trajectory
     
     if not n_clicks or not data_available or not example_data_dir:
-        return no_update, no_update, no_update
+        return no_update, no_update, no_update, no_update
     
     # Note: We don't clear session files here since example data doesn't use temp storage.
     # The uploaded-files-store will be completely replaced with example data below.
@@ -4215,7 +4205,7 @@ def load_example_data(n_clicks, session_id, input_mode):
                 html.I(className="fas fa-exclamation-circle", style={'marginRight': '10px', 'color': '#dc3545'}),
                 f"Error loading example data: {str(e)}"
             ], className="alert alert-danger")
-        ]), no_update
+        ]), no_update, None
     
     # Build rejection warning if any files were rejected
     rejection_warning = []
@@ -4236,7 +4226,7 @@ def load_example_data(n_clicks, session_id, input_mode):
     
     logger.info(f"Loaded {len(example_files)} example files")
     # Example data jobs are automatically set to public for demonstration purposes
-    return example_files, rejection_warning, ['public']
+    return example_files, rejection_warning, ['public'], None
 
 
 # Separate callback to update display when files are removed or mode changes
@@ -4249,17 +4239,27 @@ def load_example_data(n_clicks, session_id, input_mode):
      Output('submit-status-message', 'style', allow_duplicate=True)],
     [Input('uploaded-files-store', 'data'),
      Input('input-mode-selector', 'value')],
+    [State('upload-rejection-store', 'data')],
     prevent_initial_call=True
 )
-def update_file_display_on_removal(stored_files, input_mode):
+def update_file_display_on_removal(stored_files, input_mode, rejection_data):
     """Update file display when files are removed from store or mode changes."""
+
+    def _rejection_banner(data):
+        if not data:
+            return []
+        return [html.Div([
+            html.I(className="fas fa-times-circle", style={'marginRight': '8px'}),
+            f"{data.get('filename', 'File')}: {data.get('message', 'Upload rejected')}"
+        ], className="alert alert-danger", style={'marginBottom': '15px'})]
+
     if not stored_files:
         # No files - hide display and disable submit
-        return [], {'display': 'none'}, [], True, [
+        return [], {'display': 'none'}, _rejection_banner(rejection_data), True, [
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
             "Upload required files to enable analysis"
         ], {
-            'color': '#8A9A8A', 
+            'color': '#8A9A8A',
             'fontStyle': 'italic',
             'textAlign': 'center'
         }
@@ -4298,11 +4298,11 @@ def update_file_display_on_removal(stored_files, input_mode):
         if hidden_files_indicator:
             empty_display.append(hidden_files_indicator)
         
-        return empty_display if empty_display else [], {'display': 'block' if hidden_files_indicator else 'none'}, [], True, [
+        return empty_display if empty_display else [], {'display': 'block' if hidden_files_indicator else 'none'}, _rejection_banner(rejection_data), True, [
             html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
             f"Upload required files for {input_mode.title()} mode to enable analysis"
         ], {
-            'color': '#8A9A8A', 
+            'color': '#8A9A8A',
             'fontStyle': 'italic',
             'textAlign': 'center'
         }
@@ -4516,7 +4516,7 @@ def update_file_display_on_removal(stored_files, input_mode):
         hidden_files_indicator
     ] if hidden_files_indicator else [file_list_inner])
     
-    return file_list_container, {'display': 'block'}, validation_messages, submit_disabled, status_message, status_style
+    return file_list_container, {'display': 'block'}, _rejection_banner(rejection_data) + validation_messages, submit_disabled, status_message, status_style
 
 # Clear upload component when files are removed to allow re-uploading the same file
 @app.callback(
@@ -4689,7 +4689,8 @@ def update_structure_selection(selected_values, stored_files, select_ids, input_
 
 
 @app.callback(
-    Output('uploaded-files-store', 'data', allow_duplicate=True),
+    [Output('uploaded-files-store', 'data', allow_duplicate=True),
+     Output('upload-rejection-store', 'data', allow_duplicate=True)],
     [Input({'type': 'remove-file', 'index': dash.dependencies.ALL}, 'n_clicks_timestamp')],
     [State('uploaded-files-store', 'data'),
      State('session-id-store', 'data')],
@@ -4698,15 +4699,15 @@ def update_structure_selection(selected_values, stored_files, select_ids, input_
 def remove_file(n_clicks_timestamp, stored_files, session_id):
     """Remove a file from the upload list and delete from server."""
     logger.info(f"remove_file callback triggered: n_clicks_timestamp={n_clicks_timestamp}, stored_files count={len(stored_files) if stored_files else 0}")
-    
+
     # Use callback_context to determine what triggered the callback
     ctx = callback_context
-    
+
     # Check if callback was actually triggered by a click
     if not ctx.triggered:
         logger.info("No trigger, skipping")
-        return no_update
-    
+        return no_update, no_update
+
     # Get triggered info
     triggered_prop = ctx.triggered[0]
     triggered_value = triggered_prop.get('value')
@@ -4716,34 +4717,34 @@ def remove_file(n_clicks_timestamp, stored_files, session_id):
     # n_clicks_timestamp is 0/-1/None until actually clicked, then becomes a positive epoch-ms
     if not triggered_value or triggered_value <= 0:
         logger.info(f"Triggered value {triggered_value} is not a valid click timestamp, skipping")
-        return no_update
-    
+        return no_update, no_update
+
     # Get the triggered_id (pattern-matching dict)
     triggered_id = ctx.triggered_id
     logger.info(f"triggered_id: {triggered_id}")
-    
+
     # If no triggered_id or it's not a dict (pattern-matching), skip
     if not triggered_id or not isinstance(triggered_id, dict):
         logger.info("No valid triggered_id dict, skipping")
-        return no_update
-    
+        return no_update, no_update
+
     # Check if this is actually a remove-file button
     if triggered_id.get('type') != 'remove-file':
         logger.info("Not a remove-file button, skipping")
-        return no_update
-    
+        return no_update, no_update
+
     if not stored_files:
         logger.info("No stored files to remove")
-        return no_update
-    
+        return no_update, no_update
+
     # Get the file key from the triggered button's index
     file_key_to_remove = triggered_id.get('index')
     logger.info(f"Looking for file with key: {file_key_to_remove}")
-    
+
     if not file_key_to_remove:
         logger.warning("No file key in triggered_id")
-        return no_update
-    
+        return no_update, no_update
+
     try:
         # Find the file by temp_file_id
         file_to_remove = None
@@ -4753,30 +4754,31 @@ def remove_file(n_clicks_timestamp, stored_files, session_id):
                 file_to_remove = f
                 logger.info(f"Found file by temp_file_id: {temp_file_id}")
                 break
-        
+
         if file_to_remove:
             filename_to_remove = file_to_remove['filename']
-            
+
             # Delete the temp file from server
             temp_file_id = file_to_remove.get('temp_file_id')
             file_session_id = file_to_remove.get('session_id', session_id)
             if temp_file_id and file_session_id:
                 delete_temp_file(temp_file_id, file_session_id)
-            
+
             # Remove the file from the list by comparing temp_file_id
             updated_files = [f for f in stored_files if f.get('temp_file_id') != file_key_to_remove]
             logger.info(f"Removed file: {filename_to_remove}, Remaining files: {len(updated_files)}")
-            return updated_files
+            # Successful removal: clear the rejection banner (deliberate file-state action)
+            return updated_files, None
         else:
             logger.warning(f"File not found for key: {file_key_to_remove}")
             # Log all temp_file_ids for debugging
             for idx, f in enumerate(stored_files):
                 logger.info(f"  File {idx}: filename={f.get('filename')}, temp_file_id={f.get('temp_file_id')}")
-            return no_update
-            
+            return no_update, no_update
+
     except Exception as e:
         logger.error(f"Error removing file: {e}")
-        return no_update
+        return no_update, no_update
 
 # Note: Job submission now uses local storage via backend API
 
@@ -4796,12 +4798,14 @@ def remove_file(n_clicks_timestamp, stored_files, session_id):
      State('force-field-selector', 'value'),
      State('gromacs-version-selector', 'value'),
      State('uploaded-files-store', 'data'),
-     State('session-id-store', 'data')],
+     State('session-id-store', 'data'),
+     State('user-email-input', 'value')],
     prevent_initial_call=True
 )
-def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff, 
-                         source_sel, target_sel, privacy_setting, input_mode, 
-                         force_field, gromacs_version, uploaded_files, session_id):
+def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
+                         source_sel, target_sel, privacy_setting, input_mode,
+                         force_field, gromacs_version, uploaded_files, session_id,
+                         user_email):
     """Handle job submission with local file upload to backend."""
     logger.info(f"Job submission callback triggered: submit_clicks={submit_clicks}, files={len(uploaded_files) if uploaded_files else 0}")
     
@@ -4928,7 +4932,9 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 },
                 'is_private': is_private,
                 'job_name': job_name,
-                'description': f"{'Ensemble' if input_mode == 'ensemble' else 'Trajectory'} analysis using gRINN"
+                'description': f"{'Ensemble' if input_mode == 'ensemble' else 'Trajectory'} analysis using gRINN",
+                # R1.c — optional opt-in completion-notification address
+                'user_email': (user_email or '').strip() or None
             },
             timeout=30
         )
@@ -5021,7 +5027,11 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                         if temp_file_id and file_session_id:
                             delete_temp_file(temp_file_id, file_session_id)
                 else:
-                    error_msg = f"Upload failed for {file_data['filename']}: {upload_response.status_code}"
+                    try:
+                        backend_error = upload_response.json().get('error') or f"HTTP {upload_response.status_code}"
+                    except (ValueError, AttributeError):
+                        backend_error = f"HTTP {upload_response.status_code}"
+                    error_msg = f"Upload failed for {file_data['filename']}: {backend_error}"
                     logger.error(error_msg)
                     return html.Div([
                         html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),

@@ -120,6 +120,37 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             return tail
         return "\n".join(lines[-40:]).strip()
 
+    def _extract_runtime_summary(runtime_logs: str) -> str:
+        """Extract a meaningful summary from a non-zero runtime container log.
+
+        Handles per-chunk grompp/mdrun failures emitted by gRINN's
+        ChunkFailedError handler (see grinn_workflow.py R1.g) and falls back
+        to the last interesting lines if no specific marker is found.
+        """
+        if not runtime_logs:
+            return ""
+
+        lines = runtime_logs.splitlines()
+
+        # Prefer the chunk-failure block emitted by R1.g.
+        for i, line in enumerate(lines):
+            if "Per-chunk grompp/mdrun failed" in line or \
+               "Workflow aborted at the interaction-energy stage" in line:
+                start = max(0, i - 1)
+                end = min(len(lines), i + 35)
+                block = "\n".join(lines[start:end]).strip()
+                if block:
+                    return block
+
+        # Fallback: last few ERROR/Fatal lines.
+        interesting = [
+            ln for ln in lines
+            if ('ERROR' in ln or 'Fatal error' in ln or ln.startswith('❌'))
+        ]
+        if interesting:
+            return "\n".join(interesting[-30:]).strip()
+        return "\n".join(lines[-40:]).strip()
+
     def _get_existing_error_message() -> Optional[str]:
         try:
             existing_job = local_db_manager.get_job(job_id)
@@ -134,6 +165,56 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             JobStatus.FAILED,
             current_step=current_step,
             error_message=existing_error or error_message
+        )
+
+    def _maybe_send_completion_email(
+        job_id_local: str,
+        *,
+        status: str,
+        error_summary: Optional[str],
+    ) -> None:
+        """R1.c — opt-in job-completion email. Best-effort; never raises into caller."""
+        try:
+            job = local_db_manager.get_job(job_id_local)
+        except Exception as e:
+            logger.warning(f"Email helper: cannot load job {job_id_local}: {e}")
+            return
+        if not job or not getattr(job, "user_email", None):
+            return
+
+        # JobModel.input_files is a JSON column: List[Dict] with a 'filename' key.
+        raw_files = job.input_files or []
+        filenames = []
+        for f in raw_files:
+            if isinstance(f, dict):
+                name = f.get("filename") or f.get("name")
+                if name:
+                    filenames.append(name)
+            elif f:
+                filenames.append(str(f))
+
+        # Monitor URL — frontend route /monitor/{job_id}.
+        base = (config.frontend_base_url or "").rstrip("/")
+        if not base:
+            base = config.backend_public_url.rstrip("/")
+        monitor_url = f"{base}/monitor/{job_id_local}"
+
+        dashboard_url: Optional[str] = None
+        if status == "COMPLETED":
+            try:
+                dashboard_url = config.get_dashboard_public_url(job_id_local)
+            except (ValueError, Exception):
+                dashboard_url = None
+
+        from shared.notifications import send_job_complete_email
+        send_job_complete_email(
+            to_addr=job.user_email,
+            job_id=job_id_local,
+            status=status,
+            input_filenames=filenames,
+            monitor_url=monitor_url,
+            dashboard_url=dashboard_url,
+            error_summary=error_summary,
         )
 
     try:
@@ -508,6 +589,22 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             
             # Check if container exited successfully
             if exit_code != 0:
+                # R1.g — extract a meaningful summary from the runtime logs and
+                # record it as the user-visible error message before raising.
+                runtime_summary = _extract_runtime_summary(logs)
+                error_parts = [
+                    "Job failed during gRINN run.\n\n",
+                    runtime_summary or "(no extracted summary)",
+                ]
+                if logs and len(logs.strip()) > 0:
+                    raw_logs = logs
+                    if len(raw_logs) > 15000:
+                        raw_logs = "... (truncated) ...\n" + raw_logs[-15000:]
+                    error_parts.append("\n\n=== Full Container Output (tail) ===\n")
+                    error_parts.append(raw_logs)
+                error_message = _truncate_for_db("".join(error_parts))
+                _update_failed_preserving_error("Job failed", error_message)
+
                 # Keep failed container for debugging
                 logger.error(f"Container {container_name} failed with exit code {exit_code}. Keeping container for log inspection.")
                 raise RuntimeError(f"Container exited with code {exit_code}. Check logs for details.")
@@ -534,32 +631,51 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             # Update job status to completed
             local_db_manager.update_job_status(job_id, JobStatus.COMPLETED, "Job completed successfully", 100)
 
-            
+            # R1.c — opt-in email notification on success.
+            try:
+                _maybe_send_completion_email(job_id, status="COMPLETED", error_summary=None)
+            except Exception as mail_err:
+                # Belt-and-braces: helper already swallows; this is here only
+                # in case importing/looking up state itself raises.
+                logger.warning(f"Email notification dispatch error for job {job_id}: {mail_err}")
+
             logger.info(f"Job {job_id} completed successfully")
             return {
                 'status': 'completed',
                 'result_files': result_files,
                 'message': 'Job completed successfully'
             }
-            
+
         except Exception as e:
             logger.error(f"Job {job_id} failed: {str(e)}")
-            
+
             # Update job status to failed (preserve richer error messages if already set)
             _update_failed_preserving_error("Job failed", str(e))
-            
+
+            # R1.c — opt-in email notification on failure.
+            try:
+                _maybe_send_completion_email(job_id, status="FAILED", error_summary=str(e)[:500])
+            except Exception as mail_err:
+                logger.warning(f"Email notification dispatch error for job {job_id}: {mail_err}")
+
             raise
-        
+
         # No temp directory cleanup needed - using local storage directly
-    
+
     except Exception as e:
         logger.error(f"Job {job_id} failed: {str(e)}")
-        
+
         # Update job status to failed
         try:
             _update_failed_preserving_error("Job failed", str(e))
         except Exception as db_error:
             logger.error(f"Failed to update job status: {str(db_error)}")
+
+        # R1.c — opt-in email notification on outer failure path.
+        try:
+            _maybe_send_completion_email(job_id, status="FAILED", error_summary=str(e)[:500])
+        except Exception as mail_err:
+            logger.warning(f"Email notification dispatch error for job {job_id}: {mail_err}")
         
         raise
 
