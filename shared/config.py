@@ -130,6 +130,8 @@ class Config:
     example_results1_host_path: Optional[str] = None     # Host path override for slot 1 (Docker-in-Docker)
     example_results2_path: Optional[str] = None          # Pre-computed example results slot 2
     example_results2_host_path: Optional[str] = None     # Host path override for slot 2 (Docker-in-Docker)
+    example_results3_path: Optional[str] = None          # Pre-computed example results slot 3
+    example_results3_host_path: Optional[str] = None     # Host path override for slot 3 (Docker-in-Docker)
     
     # Frontend base URL for constructing full URLs (e.g., for bookmark links)
     frontend_base_url: Optional[str] = None  # e.g., "https://grinn.example.com"
@@ -303,7 +305,7 @@ class Config:
         else:
             self.example_data_path_ensemble = None
 
-        for n, env_base in [(1, 'EXAMPLE_RESULTS1'), (2, 'EXAMPLE_RESULTS2')]:
+        for n, env_base in [(1, 'EXAMPLE_RESULTS1'), (2, 'EXAMPLE_RESULTS2'), (3, 'EXAMPLE_RESULTS3')]:
             p = os.getenv(f"{env_base}_PATH")
             if p and os.path.isdir(p):
                 setattr(self, f'example_results{n}_path', p)

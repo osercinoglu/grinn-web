@@ -1062,6 +1062,9 @@ def start_dashboard(job_id):
         elif job_id == 'example-results-2':
             if not config.example_results2_path:
                 return jsonify({'error': 'Example results (slot 2) not configured'}), 404
+        elif job_id == 'example-results-3':
+            if not config.example_results3_path:
+                return jsonify({'error': 'Example results (slot 3) not configured'}), 404
         else:
             # Verify job exists
             job = database_manager.get_job(job_id)

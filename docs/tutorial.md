@@ -120,6 +120,9 @@ Ensemble mode accepts a single multi-model PDB file, such as an NMR ensemble or 
 
 > **Figure 1:** The Submit Job page. Navigation bar at top; Analysis Mode radio buttons; file upload area with size-limit labels; Load Example Data button; GROMACS version dropdown.
 
+> [!TIP]
+> **Pre-flight your bundle locally first.** Run the optional `scripts/inspect_sim.py` script on your data before uploading — it catches the common errors (wrong file extensions, oversized trajectories, missing `#include`'d topology files, ligand-out-of-pocket-at-frame-0, etc.) in seconds, so you don't burn an upload + queue cycle on a job that would have been rejected at preflight. See [Help §3.7 Pre-flight Inspection Tool](/help#preflight-inspection-tool) for usage.
+
 Files can be added by dragging and dropping them onto the upload area, or by clicking inside the area to open a file browser. To get started quickly without your own data, click the **Load Trajectory Example Data** button to pre-load the Endolysin dataset — a small, fully configured trajectory job ready to submit immediately.
 
 | File Type | Limit |
@@ -145,8 +148,12 @@ An **Advanced Parameters** collapsible panel is available below the file upload 
 |-----------|---------|-------------|
 | Skip Frames | 1 | Analyze every N-th frame (1 = analyze all frames) |
 | Initial Pair Filter Cutoff (Å) | 12 | Maximum center-of-mass distance between residue pairs for inclusion in analysis |
+| Initial Pair Filter Mode | Static | When the cutoff is checked: once on the input structure (`Static`) vs once per trajectory frame (`Dynamic`) |
 | Source Selection | — | ProDy atom selection syntax to define source residues, e.g. `protein and resid 1:100` |
 | Target Selection | — | ProDy atom selection syntax to define target residues, e.g. `protein and resid 101:200` |
+
+> [!NOTE]
+> **When to switch the pair-filter mode.** The default `Static` filter checks the cutoff once on the input structure — appropriate for equilibrium MD where the system fluctuates around a single bound state. Switch to `Dynamic` for trajectories that capture binding/unbinding events, large conformational changes, or any case where a residue or ligand visits and leaves the region of interest only briefly. `Dynamic` scans every frame and keeps any pair that comes within the cutoff at any point, at a small additional cost (typically a few seconds for a 200-frame trajectory).
 
 > [!WARNING]
 > Excluding large portions of the system via Source/Target selections will break downstream Protein Energy Network analyses — network weights for excluded residues will be missing. Use these selections only when you have a specific reason to restrict the analysis, and be aware of the downstream consequences.

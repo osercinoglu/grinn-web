@@ -402,6 +402,8 @@ class DashboardManager:
             host_output_dir = self.config.example_results1_host_path or job_output_dir
         elif job_id == 'example-results-2':
             host_output_dir = self.config.example_results2_host_path or job_output_dir
+        elif job_id == 'example-results-3':
+            host_output_dir = self.config.example_results3_host_path or job_output_dir
         else:
             host_output_dir = job_output_dir
             container_storage_path = self.config.storage_path  # e.g., /data/grinn-jobs
@@ -744,6 +746,8 @@ class DashboardManager:
             return self.config.example_results1_path
         elif job_id == 'example-results-2':
             return self.config.example_results2_path
+        elif job_id == 'example-results-3':
+            return self.config.example_results3_path
         # This depends on the storage implementation
         if hasattr(self.storage, 'get_output_directory'):
             # LocalStorageManager

@@ -142,6 +142,93 @@ After analysis completes, non-standard residues appear in the **interaction-ener
 
 Ensemble mode does not support non-standard residues at all (the `pdb2gmx` topology generator handles only the standard 20 amino acids). Non-standard residues must therefore be analysed via Trajectory mode with a user-supplied topology — see [3.5 Ligand and Cofactor Support](#35-ligand-and-cofactor-support) for the full support matrix.
 
+### 3.7 Pre-flight Inspection Tool {#preflight-inspection-tool}
+
+`scripts/inspect_sim.py` is an optional helper script that screens your bundle locally **before** uploading. It mirrors every check that i-gRINN's server-side preflight and the in-container `gRINN` workflow run, so a clean local report means the server-side run will get past validation.
+
+**Quick start (auto-discovery from a bundle directory):**
+
+```bash
+python scripts/inspect_sim.py --bundle ./my_results_dir/
+```
+
+**Explicit invocation:**
+
+```bash
+python scripts/inspect_sim.py \
+    --structure system_dry.pdb \
+    --trajectory traj_dry.xtc \
+    --topology  topol_dry.top
+```
+
+**Sample output:**
+
+```
+gRINN pre-flight inspection — trajectory mode
+====================================================================
+[ · ] bundle (trajectory mode): structure=system_dry.pdb; trajectory=traj_dry.xtc; topology=topol_dry.top; itps=5
+[ ✓ ] structure: system_dry.pdb (747.7 KB)
+[ ✓ ] trajectory: traj_dry.xtc (6.9 MB)
+[ ✓ ] topology: topol_dry.top (765 B)
+[ ✓ ] trajectory size: 6.9/100 MB
+[ ✓ ] frame count: 200/200
+[ ⚠ ] chain IDs: 1 unique chain ['A'] but resnums reset 4664 times
+        → i-gRINN auto-corrects via topology when --top is provided
+[ ✓ ] topology #includes: 5 local
+[ ✓ ] residue coverage: all 21 unique residue types accounted for
+[ ✓ ] solvent: PDB is dry
+[ ⚠ ] lone-ligand: NEL307 is 51.7 Å from protein at frame 0
+        → Pass pair_filter_mode=dynamic in Advanced Parameters
+[ ✓ ] force field: detected 'amber14sb'
+
+Summary: 0 error(s), 2 warning(s) — bundle is acceptable.
+```
+
+**What it checks:**
+
+| # | Check | Severity |
+|---|---|---|
+| 1 | Required files exist and are readable | error |
+| 2 | Structure file is `.pdb` or `.gro` (mmCIF rejected) | error |
+| 3 | Trajectory file is `.xtc` (or `.trr`) | error |
+| 4 | Topology file is `.top` — NOT an `.itp` (which is a common upload mistake) | error |
+| 5 | Trajectory ≤ 100 MB and other files ≤ 10 MB each | error |
+| 6 | Frame count fits inside the i-gRINN cap (200 by default) | warning + stride suggestion |
+| 7 | Mode-specific structure: trajectory → 1 MODEL; ensemble → ≥2 MODELs | error |
+| 8 | Mode-specific files: trajectory needs both XTC + TOP; ensemble forbids them | error |
+| 9 | **Chain ID corruption**: duplicate `(chain, resnum)` tuples — the mdtraj GRO→PDB pathology | warning (auto-fixed by gRINN if topology is supplied) |
+| 10 | All `#include` directives in the `.top` resolve locally (or are GROMACS share-tree refs) | error |
+| 11 | All residue names appear in the topology's `[ molecules ]` chain | warning |
+| 12 | PDB is dry (no waters/ions); CRYST1 box vectors present | warning |
+| 13 | **Lone-ligand check**: any non-standard residue > 12 Å from protein at frame 0 → suggests `pair_filter_mode=dynamic` | warning |
+| 14 | Force-field family detected (amber14sb, charmm36, oplsaa, etc.) | warning if unidentified |
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| `0` | All checks passed (warnings allowed). Safe to upload. |
+| `1` | At least one error. The job would fail server-side or in-container. |
+| `2` | Script-level usage error (missing dependency, bad CLI args, etc.). |
+
+**Dependencies:**
+
+The script is pure Python stdlib for everything except trajectory frame counting, which uses `mdtraj` if available. If `mdtraj` is not installed, the frame-count check is skipped with a friendly install hint:
+
+```bash
+pip install mdtraj
+```
+
+The script **does not run GROMACS** and never modifies your files.
+
+**Limitations:**
+
+- The script diagnoses but does not fix. For each warning/error it points at the corrective command (`gmx trjconv`, PyMOL, etc.), but you run those yourself.
+- The lone-ligand heuristic uses COM-COM distance against the protein centroid as an approximation; a residue that's "close" to a flexible loop but far from the protein bulk centroid may still be flagged.
+- Force-field detection is keyword-based (looks for "amber14sb", "ff14sb", "charmm36" etc. in the topology text). Custom or anonymised force fields will be reported as "unrecognised".
+
+**Source:** [`scripts/inspect_sim.py`](https://github.com/osercinoglu/grinn-web/blob/main/scripts/inspect_sim.py) in this repository.
+
 ---
 
 ## 4. Running Analysis

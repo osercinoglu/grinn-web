@@ -380,7 +380,14 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
             # Initial pair filter cutoff (default: 10.0)
             if job_params.get('initpairfilter_cutoff'):
                 docker_command.extend(['--initpairfiltercutoff', str(job_params['initpairfilter_cutoff'])])
-            
+
+            # Initial pair-filter mode: 'static' (default) = single-frame check;
+            # 'dynamic' = per-frame scan over the full trajectory. Only emit the
+            # CLI flag when non-default to keep gRINN's argv minimal.
+            pair_filter_mode = job_params.get('pair_filter_mode')
+            if pair_filter_mode and pair_filter_mode != 'static':
+                docker_command.extend(['--pair_filter_mode', pair_filter_mode])
+
             # Skip frames in trajectory (default: 1 = no skipping)
             if job_params.get('skip_frames') and job_params['skip_frames'] > 1:
                 docker_command.extend(['--skip', str(job_params['skip_frames'])])

@@ -61,7 +61,13 @@ class JobParameters:
     
     # Force field for ensemble mode (topology recreation)
     force_field: Optional[str] = None  # e.g., 'amber99sb-ildn', 'charmm27', etc.
-    
+
+    # Initial pair-filter mode. 'static' = single-frame check (default; matches
+    # historical behaviour). 'dynamic' = per-frame scan, recommended for
+    # binding/unbinding or large conformational-change trajectories where a
+    # ligand or loop visits the region of interest only briefly.
+    pair_filter_mode: str = "static"
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert parameters to dictionary."""
         return {
@@ -69,7 +75,8 @@ class JobParameters:
             "initpairfilter_cutoff": self.initpairfilter_cutoff,
             "source_sel": self.source_sel,
             "target_sel": self.target_sel,
-            "force_field": self.force_field
+            "force_field": self.force_field,
+            "pair_filter_mode": self.pair_filter_mode,
         }
     
     @classmethod

@@ -107,6 +107,7 @@ EXAMPLE_DATA_TRAJECTORY_AVAILABLE = _check_example_data_available(config.example
 EXAMPLE_DATA_ENSEMBLE_AVAILABLE = _check_example_data_available(config.example_data_path_ensemble)
 EXAMPLE_RESULTS1_AVAILABLE = bool(config.example_results1_path)
 EXAMPLE_RESULTS2_AVAILABLE = bool(config.example_results2_path)
+EXAMPLE_RESULTS3_AVAILABLE = bool(config.example_results3_path)
 
 if EXAMPLE_DATA_TRAJECTORY_AVAILABLE:
     logger.info(f"Trajectory example data available at: {config.example_data_path_trajectory}")
@@ -126,6 +127,8 @@ if EXAMPLE_RESULTS1_AVAILABLE:
     logger.info(f"Example results (slot 1) available at: {config.example_results1_path}")
 if EXAMPLE_RESULTS2_AVAILABLE:
     logger.info(f"Example results (slot 2) available at: {config.example_results2_path}")
+if EXAMPLE_RESULTS3_AVAILABLE:
+    logger.info(f"Example results (slot 3) available at: {config.example_results3_path}")
 
 # Temporary upload directory for server-side file storage
 import uuid
@@ -2101,23 +2104,22 @@ def _build_example_data_section(mode: str) -> html.Div:
         example_path = config.example_data_path_trajectory
         mode_label = "Trajectory"
 
+    # Count-driven layout so adding/removing slots stays a one-line change.
+    _example_slots = [
+        (EXAMPLE_RESULTS1_AVAILABLE, "Protein Only Example Results", "/dashboard/example-results-1"),
+        (EXAMPLE_RESULTS2_AVAILABLE, "Protein+Ligand Example Results", "/dashboard/example-results-2"),
+        (EXAMPLE_RESULTS3_AVAILABLE, "Drug-Target Binding Example (Mpro + Nelfinavir)", "/dashboard/example-results-3"),
+    ]
+    _n_available = sum(1 for available, _, _ in _example_slots if available)
+    _col = {3: "col-4", 2: "col-6", 1: "col-12"}.get(_n_available, "col-12")
+
     _example_buttons = []
-    if EXAMPLE_RESULTS1_AVAILABLE:
-        _col = "col-6" if EXAMPLE_RESULTS2_AVAILABLE else "col-12"
+    for available, label, href in _example_slots:
+        if not available:
+            continue
         _example_buttons.append(html.Div([
-            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
-                    "Protein Only Example Results"],
-                   href="/dashboard/example-results-1", target="_blank",
-                   className="btn btn-outline-info btn-sm",
-                   style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
-                          'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
-        ], className=_col))
-    if EXAMPLE_RESULTS2_AVAILABLE:
-        _col = "col-6" if EXAMPLE_RESULTS1_AVAILABLE else "col-12"
-        _example_buttons.append(html.Div([
-            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}),
-                    "Protein+Ligand Example Results"],
-                   href="/dashboard/example-results-2", target="_blank",
+            html.A([html.I(className="fas fa-chart-line", style={'marginRight': '8px'}), label],
+                   href=href, target="_blank",
                    className="btn btn-outline-info btn-sm",
                    style={'width': '100%', 'padding': '8px 16px', 'fontSize': '0.85rem',
                           'display': 'block', 'textAlign': 'center', 'textDecoration': 'none'})
@@ -2128,7 +2130,7 @@ def _build_example_data_section(mode: str) -> html.Div:
     ) if _example_buttons else html.Div()
 
     if not data_available:
-        if EXAMPLE_RESULTS1_AVAILABLE or EXAMPLE_RESULTS2_AVAILABLE:
+        if EXAMPLE_RESULTS1_AVAILABLE or EXAMPLE_RESULTS2_AVAILABLE or EXAMPLE_RESULTS3_AVAILABLE:
             return html.Div([
                 html.Div(id="load-example-data-btn", style={'display': 'none'}),
                 results_button
@@ -2188,11 +2190,25 @@ def create_file_upload_section():
             # Right: Upload zone with custom file input for size validation
             html.Div([
                 html.Div([
+                    # R3.b — small inline hint pointing at the pre-flight script
+                    html.Div([
+                        html.I(className="fas fa-clipboard-check",
+                               style={'marginRight': '6px', 'color': '#8A9A8A'}),
+                        "Tip: pre-flight your bundle locally first — see the ",
+                        html.A("Pre-flight Inspection Tool",
+                               href="/help#preflight-inspection-tool", target="_blank",
+                               style={'color': '#5A7A60', 'textDecoration': 'underline'}),
+                        " for an optional script that catches common upload errors."
+                    ], style={'fontSize': '0.8rem', 'color': '#6c757d',
+                              'textAlign': 'center', 'marginBottom': '8px',
+                              'padding': '6px 8px', 'backgroundColor': '#f8f9fa',
+                              'border': '1px dashed #dee2e6', 'borderRadius': '4px'}),
+
                     # Visual upload zone - clickable area
                     html.Div([
                         html.Div([
                             html.I(className="fas fa-cloud-upload-alt", style={'fontSize': '1.5rem', 'color': '#7C9885', 'marginBottom': '8px'}),
-                            html.Div("Drop files or click to browse", 
+                            html.Div("Drop files or click to browse",
                                     style={'fontSize': '0.9rem', 'fontWeight': '500', 'color': '#5A7A60'})
                         ], className="upload-zone", style={'padding': '20px', 'textAlign': 'center', 'cursor': 'pointer'}),
                     ], id='upload-click-zone', style={'cursor': 'pointer'}),
@@ -2460,6 +2476,29 @@ def create_submit_section():
                             step=0.1,
                             className="form-input",
                             style={'width': '100%'}
+                        )
+                    ], className="form-group"),
+
+                    html.Div([
+                        html.Label("Initial Pair Filter Mode", className="form-label"),
+                        html.Small(" (when the cutoff is checked)",
+                                   style={'color': '#8A9A8A', 'fontSize': '0.8rem'}),
+                        dcc.RadioItems(
+                            id="pair-filter-mode",
+                            options=[
+                                {'label': html.Span([
+                                    html.B("Static "),
+                                    "— check distances once on the input structure (faster; correct for equilibrium MD)"
+                                ], style={'fontSize': '0.85rem'}), 'value': 'static'},
+                                {'label': html.Span([
+                                    html.B("Dynamic "),
+                                    "— scan every frame and keep any pair within the cutoff at any point (recommended for binding/unbinding or large conformational changes)"
+                                ], style={'fontSize': '0.85rem'}), 'value': 'dynamic'},
+                            ],
+                            value='static',
+                            className="form-check",
+                            inputStyle={'marginRight': '6px'},
+                            labelStyle={'display': 'block', 'marginTop': '4px'}
                         )
                     ], className="form-group")
                 ], style={'flex': '1', 'paddingRight': '15px'}),
@@ -4799,13 +4838,14 @@ def remove_file(n_clicks_timestamp, stored_files, session_id):
      State('gromacs-version-selector', 'value'),
      State('uploaded-files-store', 'data'),
      State('session-id-store', 'data'),
-     State('user-email-input', 'value')],
+     State('user-email-input', 'value'),
+     State('pair-filter-mode', 'value')],
     prevent_initial_call=True
 )
 def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                          source_sel, target_sel, privacy_setting, input_mode,
                          force_field, gromacs_version, uploaded_files, session_id,
-                         user_email):
+                         user_email, pair_filter_mode):
     """Handle job submission with local file upload to backend."""
     logger.info(f"Job submission callback triggered: submit_clicks={submit_clicks}, files={len(uploaded_files) if uploaded_files else 0}")
     
@@ -4928,7 +4968,8 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                     'target_sel': target_sel or None,
                     'input_mode': input_mode or 'trajectory',
                     'force_field': force_field if input_mode == 'ensemble' else None,
-                    'gromacs_version': gromacs_version if input_mode == 'trajectory' else None
+                    'gromacs_version': gromacs_version if input_mode == 'trajectory' else None,
+                    'pair_filter_mode': pair_filter_mode or 'static'
                 },
                 'is_private': is_private,
                 'job_name': job_name,
@@ -6030,6 +6071,8 @@ def update_dashboard_status(n_intervals, job_id):
             job_name = "Example Results (Protein-Only)"
         elif job_id == 'example-results-2':
             job_name = "Example Results (Protein+Ligand)"
+        elif job_id == 'example-results-3':
+            job_name = "Example Results (Mpro + Nelfinavir, Drug-Target Binding)"
         else:
             # Get job details
             job_backend_url = f"{config.backend_url}/api/jobs/{job_id}"
