@@ -121,7 +121,7 @@ Ensemble mode accepts a single multi-model PDB file, such as an NMR ensemble or 
 > **Figure 1:** The Submit Job page. Navigation bar at top; Analysis Mode radio buttons; file upload area with size-limit labels; Load Example Data button; GROMACS version dropdown.
 
 > [!TIP]
-> **Pre-flight your bundle locally first.** Run the optional `scripts/inspect_sim.py` script on your data before uploading — it catches the common errors (wrong file extensions, oversized trajectories, missing `#include`'d topology files, ligand-out-of-pocket-at-frame-0, etc.) in seconds, so you don't burn an upload + queue cycle on a job that would have been rejected at preflight. See [Help §3.7 Pre-flight Inspection Tool](/help#preflight-inspection-tool) for usage.
+> **Pre-flight your bundle locally first.** Run the optional `scripts/inspect_sim.py` script on your data before uploading — it catches the common errors (wrong file extensions, oversized trajectories, missing `#include`'d topology files, ligand-out-of-pocket-at-frame-0, etc.) in seconds, so you don't burn an upload + queue cycle on a job that would have been rejected at preflight. See [Help §3.7 Pre-flight Inspection Tool](/help#3.7-pre-flight-inspection-tool) for usage.
 
 Files can be added by dragging and dropping them onto the upload area, or by clicking inside the area to open a file browser. To get started quickly without your own data, click the **Load Trajectory Example Data** button to pre-load the Endolysin dataset — a small, fully configured trajectory job ready to submit immediately.
 

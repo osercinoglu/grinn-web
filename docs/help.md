@@ -142,9 +142,12 @@ After analysis completes, non-standard residues appear in the **interaction-ener
 
 Ensemble mode does not support non-standard residues at all (the `pdb2gmx` topology generator handles only the standard 20 amino acids). Non-standard residues must therefore be analysed via Trajectory mode with a user-supplied topology — see [3.5 Ligand and Cofactor Support](#35-ligand-and-cofactor-support) for the full support matrix.
 
-### 3.7 Pre-flight Inspection Tool {#preflight-inspection-tool}
+### 3.7 Pre-flight Inspection Tool
 
 `scripts/inspect_sim.py` is an optional helper script that screens your bundle locally **before** uploading. It mirrors every check that i-gRINN's server-side preflight and the in-container `gRINN` workflow run, so a clean local report means the server-side run will get past validation.
+
+> [!TIP]
+> **Get the script.** Right-click and "Save Link As…" on [`scripts/inspect_sim.py`](https://raw.githubusercontent.com/osercinoglu/grinn-web/main/scripts/inspect_sim.py) to save it locally, or fetch it from the shell with `curl -O https://raw.githubusercontent.com/osercinoglu/grinn-web/main/scripts/inspect_sim.py`. The script is a single self-contained file. [View source on GitHub](https://github.com/osercinoglu/grinn-web/blob/main/scripts/inspect_sim.py).
 
 **Quick start (auto-discovery from a bundle directory):**
 
@@ -226,8 +229,6 @@ The script **does not run GROMACS** and never modifies your files.
 - The script diagnoses but does not fix. For each warning/error it points at the corrective command (`gmx trjconv`, PyMOL, etc.), but you run those yourself.
 - The lone-ligand heuristic uses COM-COM distance against the protein centroid as an approximation; a residue that's "close" to a flexible loop but far from the protein bulk centroid may still be flagged.
 - Force-field detection is keyword-based (looks for "amber14sb", "ff14sb", "charmm36" etc. in the topology text). Custom or anonymised force fields will be reported as "unrecognised".
-
-**Source:** [`scripts/inspect_sim.py`](https://github.com/osercinoglu/grinn-web/blob/main/scripts/inspect_sim.py) in this repository.
 
 ---
 

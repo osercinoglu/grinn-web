@@ -2189,21 +2189,21 @@ def create_file_upload_section():
             
             # Right: Upload zone with custom file input for size validation
             html.Div([
+                # Sits outside #upload-panel: dcc.Upload's absolute overlay below would otherwise intercept link clicks.
                 html.Div([
-                    # R3.b — small inline hint pointing at the pre-flight script
-                    html.Div([
-                        html.I(className="fas fa-clipboard-check",
-                               style={'marginRight': '6px', 'color': '#8A9A8A'}),
-                        "Tip: pre-flight your bundle locally first — see the ",
-                        html.A("Pre-flight Inspection Tool",
-                               href="/help#preflight-inspection-tool", target="_blank",
-                               style={'color': '#5A7A60', 'textDecoration': 'underline'}),
-                        " for an optional script that catches common upload errors."
-                    ], style={'fontSize': '0.8rem', 'color': '#6c757d',
-                              'textAlign': 'center', 'marginBottom': '8px',
-                              'padding': '6px 8px', 'backgroundColor': '#f8f9fa',
-                              'border': '1px dashed #dee2e6', 'borderRadius': '4px'}),
+                    html.I(className="fas fa-clipboard-check",
+                           style={'marginRight': '6px', 'color': '#8A9A8A'}),
+                    "Tip: pre-flight your bundle locally first — see the ",
+                    html.A("Pre-flight Inspection Tool",
+                           href="/help#3.7-pre-flight-inspection-tool", target="_blank",
+                           style={'color': '#5A7A60', 'textDecoration': 'underline'}),
+                    " for an optional script that catches common upload errors."
+                ], style={'fontSize': '0.8rem', 'color': '#6c757d',
+                          'textAlign': 'center', 'marginBottom': '8px',
+                          'padding': '6px 8px', 'backgroundColor': '#f8f9fa',
+                          'border': '1px dashed #dee2e6', 'borderRadius': '4px'}),
 
+                html.Div([
                     # Visual upload zone - clickable area
                     html.Div([
                         html.Div([
@@ -2968,15 +2968,16 @@ app.clientside_callback(
             if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
-            setTimeout(function() {
+            // Poll: dcc.Markdown can finish mounting after content-version updates, so a single setTimeout(0) often misses the anchor.
+            var attempts = 20;
+            function tryScroll() {
                 var el = document.getElementById(currentHash);
-                if (el) {
-                    el.scrollIntoView({ behavior: 'smooth' });
-                } else {
-                    if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                }
-            }, 0);
+                if (el) { el.scrollIntoView({ behavior: 'smooth' }); return; }
+                if (--attempts > 0) { setTimeout(tryScroll, 50); return; }
+                if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            setTimeout(tryScroll, 0);
         }
         return version;
     }
@@ -2995,11 +2996,14 @@ app.clientside_callback(
         if (!hash) return window.dash_clientside.no_update;
         // Page-level slug: let the existing content-version callback handle it
         if (slugs && slugs.indexOf(hash) !== -1) return window.dash_clientside.no_update;
-        // Subheading slug: scroll to anchor
-        setTimeout(function() {
+        // Subheading slug: poll for the anchor to mount before scrolling.
+        var attempts = 20;
+        function tryScroll() {
             var el = document.getElementById(hash);
-            if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }, 0);
+            if (el) { el.scrollIntoView({ behavior: 'smooth' }); return; }
+            if (--attempts > 0) setTimeout(tryScroll, 50);
+        }
+        setTimeout(tryScroll, 0);
         return Date.now();
     }
     """,
@@ -3070,15 +3074,16 @@ app.clientside_callback(
             if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
-            setTimeout(function() {
+            // Poll: dcc.Markdown can finish mounting after content-version updates, so a single setTimeout(0) often misses the anchor.
+            var attempts = 20;
+            function tryScroll() {
                 var el = document.getElementById(currentHash);
-                if (el) {
-                    el.scrollIntoView({ behavior: 'smooth' });
-                } else {
-                    if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                }
-            }, 0);
+                if (el) { el.scrollIntoView({ behavior: 'smooth' }); return; }
+                if (--attempts > 0) { setTimeout(tryScroll, 50); return; }
+                if (pageSlug) history.replaceState(null, '', '#' + pageSlug);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            setTimeout(tryScroll, 0);
         }
         return version;
     }
@@ -3096,10 +3101,14 @@ app.clientside_callback(
         var hash = urlHash.slice(1);
         if (!hash) return window.dash_clientside.no_update;
         if (slugs && slugs.indexOf(hash) !== -1) return window.dash_clientside.no_update;
-        setTimeout(function() {
+        // Poll for the anchor to mount before scrolling.
+        var attempts = 20;
+        function tryScroll() {
             var el = document.getElementById(hash);
-            if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }, 0);
+            if (el) { el.scrollIntoView({ behavior: 'smooth' }); return; }
+            if (--attempts > 0) setTimeout(tryScroll, 50);
+        }
+        setTimeout(tryScroll, 0);
         return Date.now();
     }
     """,
