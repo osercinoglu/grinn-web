@@ -68,6 +68,8 @@ services:
       - EXAMPLE_RESULTS1_HOST_PATH=${EXAMPLE_RESULTS1_PATH:-}
       - EXAMPLE_RESULTS2_PATH=/app/example_results/2
       - EXAMPLE_RESULTS2_HOST_PATH=${EXAMPLE_RESULTS2_PATH:-}
+      - EXAMPLE_RESULTS3_PATH=/app/example_results/3
+      - EXAMPLE_RESULTS3_HOST_PATH=${EXAMPLE_RESULTS3_PATH:-}
       # Dashboard URL settings (override baked-in values from image)
       - PUBLIC_HOST=${PUBLIC_HOST:-localhost}
       - DASHBOARD_PUBLIC_HOST=${DASHBOARD_PUBLIC_HOST:-localhost}
@@ -79,6 +81,7 @@ services:
       - ${EXAMPLE_DATA_PATH_ENSEMBLE}:/app/example_data/ensemble:ro
       - ${EXAMPLE_RESULTS1_PATH:-}:/app/example_results/1:ro
       - ${EXAMPLE_RESULTS2_PATH:-}:/app/example_results/2:ro
+      - ${EXAMPLE_RESULTS3_PATH:-}:/app/example_results/3:ro
       - /var/run/docker.sock:/var/run/docker.sock  # For GROMACS version discovery
     depends_on:
       postgres:
