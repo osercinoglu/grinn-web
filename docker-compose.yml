@@ -37,6 +37,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.webapp
+    image: grinn-webapp:latest  # Match build-docker.sh tag so both build paths share one image
     user: root  # Required for Docker socket access (GROMACS version discovery)
     env_file:
       - .env
@@ -100,6 +101,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    image: grinn-worker:latest  # Match build-docker.sh tag so both build paths share one image
     user: root  # Required for Docker socket access
     environment:
       - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@postgres:5432/grinn_web
