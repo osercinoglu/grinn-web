@@ -278,7 +278,7 @@ Because private jobs are invisible in the queue, the only way to return to a pri
 
 **Data Retention Policy**
 
-- Job result files are retained for **72 hours (3 days)** after the job completes.
+- Job result files are retained for **72 hours (3 days)** from the time the job is submitted (the retention countdown starts at submission, not completion).
 - After expiration, all result files are permanently deleted from the server. The job record continues to appear in the queue (status: **EXPIRED**) for a further **7 days**, after which the record itself is also removed.
 - All timestamps displayed throughout the service are in **Turkey Standard Time (UTC+3)**.
 

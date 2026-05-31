@@ -27,6 +27,12 @@ from flask import send_file, abort
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
 from models import Job, JobStatus, JobParameters, FileType, JobSubmissionRequest
 from config import get_config, setup_logging
+from retention import (
+    file_expiry,
+    remaining_until_deletion,
+    format_remaining,
+    format_retention,
+)
 from pdb_validation import (  # noqa: F401
     validate_pdb_multimodel,
     ENSEMBLE_SINGLE_STRUCTURE_ERROR,
@@ -2763,6 +2769,49 @@ def create_job_monitoring_page(job_id: str):
         ], style={'maxWidth': '1200px', 'margin': '0 auto', 'padding': '20px'})
     ])
 
+def _build_retention_notice(job):
+    """Build the monitor-page storage-retention notice for a job, or None.
+
+    Files are auto-deleted at ``created_at + JOB_FILE_RETENTION_HOURS`` (measured
+    from submission, not completion — see shared/local_storage.py cleanup_old_jobs).
+    Returns a live countdown for COMPLETED/FAILED jobs, a "deleted" message for
+    EXPIRED jobs, and None for every other status (the queue banner covers the
+    general policy). The pure date math lives in shared/retention.py.
+    """
+    status = job.status.value if isinstance(job.status, JobStatus) else str(job.status).lower()
+
+    if status == 'expired':
+        return html.Div([
+            html.I(className="fas fa-trash-alt", style={'marginRight': '8px'}),
+            "The files for this job have been deleted under the storage-retention policy."
+        ], style={'marginBottom': '20px', 'fontSize': '0.9rem', 'color': '#95a5a6', 'fontStyle': 'italic'})
+
+    if status not in ('completed', 'failed') or not job.created_at:
+        return None
+
+    retention_hours = config.job_file_retention_hours
+    remaining = remaining_until_deletion(job.created_at, retention_hours)
+    expiry = file_expiry(job.created_at, retention_hours)
+
+    if remaining.total_seconds() <= 0:
+        message = "Files for this job are due to be deleted and will be removed at the next cleanup."
+        class_name = "alert alert-warning"
+    else:
+        message = f"Files for this job will be automatically deleted in {format_remaining(remaining)}."
+        class_name = "alert alert-warning" if remaining <= timedelta(hours=6) else "alert alert-info"
+
+    return html.Div([
+        html.I(className="fas fa-clock", style={'marginRight': '8px'}),
+        html.Span(message),
+        html.Br(),
+        html.Small(
+            f"Storage policy: kept for {format_retention(retention_hours)} after submission "
+            f"(around {expiry.strftime('%Y-%m-%d %H:%M UTC')}). Download your results before then.",
+            style={'color': '#8A9A8A'}
+        ),
+    ], className=class_name, style={'marginBottom': '20px', 'fontSize': '0.9rem'})
+
+
 def create_job_queue_page():
     """Create job queue page showing all submitted jobs."""
     return html.Div([
@@ -2776,6 +2825,13 @@ def create_job_queue_page():
             # Header with navigation
             create_header(),
             
+            # Storage-retention policy notice
+            html.Div([
+                html.I(className="fas fa-info-circle", style={'marginRight': '8px'}),
+                f"Uploaded files and results are kept for {format_retention(config.job_file_retention_hours)} "
+                "after a job is submitted, then automatically deleted."
+            ], className="alert alert-info", style={'textAlign': 'center', 'marginBottom': '20px'}),
+
             # Filter controls with flexbox layout
             html.Div([
                 html.Label("Search by Job ID:", style={'fontWeight': 'bold', 'fontSize': '0.9rem', 'whiteSpace': 'nowrap'}),
@@ -5357,6 +5413,9 @@ def update_monitor_page(n_intervals, manual_refresh, dashboard_availability, job
         job_data = response.json()
         job = Job.from_dict(job_data)
         
+        # Storage-retention countdown for this job's files
+        retention_notice = _build_retention_notice(job)
+
         # Create detailed job information
         job_details = html.Div([
             html.H3("Job Details", style={'color': '#5A7A60', 'marginBottom': '15px', 'fontSize': '0.9rem'}),
@@ -5456,6 +5515,9 @@ def update_monitor_page(n_intervals, manual_refresh, dashboard_availability, job
                     ], className="panel", style={'flex': '1', 'marginLeft': '10px'})
                 ], style={'display': 'flex', 'marginBottom': '20px'}),
                 
+                # Storage-retention countdown (created_at + JOB_FILE_RETENTION_HOURS)
+                retention_notice,
+
                 # Progress section
                 html.Div([
                     html.H5("Progress", style={'marginBottom': '10px', 'fontSize': '0.9rem'}),

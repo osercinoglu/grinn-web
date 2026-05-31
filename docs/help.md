@@ -529,7 +529,7 @@ Located in the `pen_precomputed/` subfolder:
 
 ### 7.2 Data Retention
 
-- Job results are retained for **72 hours** (3 days) by default
+- Job results are retained for **72 hours** (3 days) from submission by default
 - After expiration, files are deleted, but job records remain visible for a further **7 days**.
 - Download your results before expiration to preserve them.
 
