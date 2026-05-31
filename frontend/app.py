@@ -1935,6 +1935,24 @@ def create_header():
                         }
                     ),
                     html.Button(
+                        [html.I(className="fas fa-quote-right", style={'marginRight': '6px'}), "Cite"],
+                        id="nav-cite-link",
+                        n_clicks=0,
+                        className="nav-link",
+                        style={
+                            'display': 'inline-block',
+                            'padding': '8px 16px',
+                            'backgroundColor': 'rgba(108, 117, 125, 0.1)',
+                            'color': '#6c757d',
+                            'border': '1px solid rgba(108, 117, 125, 0.3)',
+                            'borderRadius': '5px',
+                            'fontSize': '0.9rem',
+                            'fontWeight': '500',
+                            'marginRight': '10px',
+                            'cursor': 'pointer'
+                        }
+                    ),
+                    html.Button(
                         [html.I(className="fas fa-map-signs", style={'marginRight': '6px'}), "Tour"],
                         id="start-tutorial-btn",
                         className="nav-link",
@@ -1955,11 +1973,21 @@ def create_header():
         ], style={
             'display': 'flex',
             'alignItems': 'center'
-        })
+        }),
+        html.Div(id='cite-scroll-dummy', style={'display': 'none'})
     ], style={
         'margin': '20px',
         'padding': '20px'
     })
+
+
+PAPER_DOI_URL = "https://doi.org/10.1093/nar/gkag516"
+PAPER_CITATION = (
+    "Serçinoğlu, O., Eke, T.E. and Özbek, P. (2026) i-gRINN: a next-generation web "
+    "server for protein energy network analysis of heterogeneous biomolecular systems "
+    "with natural language-based data exploration. Nucleic Acids Research, gkag516. "
+    "https://doi.org/10.1093/nar/gkag516"
+)
 
 
 def create_footer():
@@ -2053,7 +2081,76 @@ def create_footer():
             'textAlign': 'center',
             'marginBottom': '15px'
         }),
-        
+
+        # Citation — "Please cite" (anchor target for the header "Cite" link)
+        html.Div([
+            html.P("Please cite", style={
+                'margin': '0 0 8px 0',
+                'fontSize': '0.9rem',
+                'fontWeight': 'bold',
+                'color': '#5A7A60'
+            }),
+            html.P([
+                "Serçinoğlu, O., Eke, T.E. and Özbek, P. (2026) ",
+                html.A(
+                    "i-gRINN: a next-generation web server for protein energy network "
+                    "analysis of heterogeneous biomolecular systems with natural "
+                    "language-based data exploration.",
+                    href=PAPER_DOI_URL,
+                    target="_blank",
+                    rel="noopener noreferrer",
+                    style={'color': '#5A7A60', 'textDecoration': 'none', 'fontWeight': '500'}
+                ),
+                " ",
+                html.Em("Nucleic Acids Research"),
+                ", gkag516. ",
+                html.A(
+                    "https://doi.org/10.1093/nar/gkag516",
+                    href=PAPER_DOI_URL,
+                    target="_blank",
+                    rel="noopener noreferrer",
+                    style={'color': '#6A8A70', 'textDecoration': 'none', 'wordBreak': 'break-all'}
+                ),
+            ], style={
+                'margin': '0 auto',
+                'maxWidth': '720px',
+                'fontSize': '0.85rem',
+                'color': '#6A8A70',
+                'lineHeight': '1.5'
+            }),
+            html.Div([
+                dcc.Clipboard(
+                    content=PAPER_CITATION,
+                    title="Copy citation",
+                    style={
+                        'cursor': 'pointer',
+                        'color': '#5A7A60',
+                        'fontSize': '1rem'
+                    }
+                ),
+                html.Span("Copy citation", style={
+                    'fontSize': '0.8rem',
+                    'color': '#5A7A60',
+                    'fontWeight': '500'
+                })
+            ], style={
+                'display': 'flex',
+                'alignItems': 'center',
+                'justifyContent': 'center',
+                'gap': '6px',
+                'marginTop': '10px'
+            })
+        ], id='cite', style={
+            'maxWidth': '780px',
+            'margin': '0 auto 20px auto',
+            'padding': '15px 20px',
+            'textAlign': 'center',
+            'backgroundColor': 'rgba(90, 122, 96, 0.05)',
+            'border': '1px solid rgba(90, 122, 96, 0.15)',
+            'borderRadius': '8px',
+            'scrollMarginTop': '20px'
+        }),
+
         # Copyright notice
         html.Div([
             html.P(
@@ -2071,6 +2168,26 @@ def create_footer():
         'marginTop': '40px',
         'padding': '30px 20px'
     })
+
+
+# Smooth-scroll to the footer "Please cite" block when the header "Cite" link is clicked.
+# Native "#cite" anchors are unreliable under Dash's Location router, so scroll explicitly.
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            var el = document.getElementById('cite');
+            if (el) {
+                el.scrollIntoView({behavior: 'smooth', block: 'start'});
+            }
+        }
+        return '';
+    }
+    """,
+    Output('cite-scroll-dummy', 'children'),
+    Input('nav-cite-link', 'n_clicks'),
+    prevent_initial_call=True
+)
 
 
 def create_input_mode_selector():
