@@ -635,8 +635,11 @@ def process_grinn_job(self, job_id: str, job_params: Dict[str, Any]):
                     relative_path = os.path.relpath(local_path, output_dir)
                     result_files.append(relative_path)
             
-            # Update job status to completed
-            local_db_manager.update_job_status(job_id, JobStatus.COMPLETED, "Job completed successfully", 100)
+            # Note: terminal COMPLETED transition is owned by the reconciler
+            # beat task (shared.reconciler.reconcile_completed_jobs). If this
+            # worker process were SIGKILLed by the Celery time limit before
+            # reaching here, the reconciler would still promote the row within
+            # ~RECONCILER_INTERVAL_SECONDS of the gRINN container's exit.
 
             # R1.c — opt-in email notification on success.
             try:
@@ -818,6 +821,24 @@ def cleanup_idle_dashboards():
         logger.error(f"Dashboard cleanup failed: {str(e)}")
 
 
+@celery_app.task
+def reconcile_completed_jobs():
+    """Promote RUNNING jobs whose container finished on disk to COMPLETED.
+
+    Thin Celery wrapper around shared.reconciler.reconcile_completed_jobs;
+    the real logic lives there so it can be unit-tested without Celery.
+    """
+    from shared.reconciler import reconcile_completed_jobs as _reconcile_impl
+    local_db_manager = DatabaseManager()
+    local_config = get_config()
+    local_storage_manager = get_storage_manager(local_config.storage_path)
+    try:
+        return _reconcile_impl(local_db_manager, local_storage_manager)
+    except Exception as e:
+        logger.error(f"Reconciler pass failed: {str(e)}")
+        return 0
+
+
 # Periodic task to cleanup old jobs
 # Schedule interval is configurable via CLEANUP_INTERVAL_SECONDS (default: 6 hours)
 _cleanup_config = get_config()
@@ -827,6 +848,7 @@ logger.info(f"Cleanup scheduler configured: interval={_cleanup_config.cleanup_in
 logger.info(f"Worker health monitoring: interval=60s, timeout={_cleanup_config.worker_heartbeat_timeout_seconds}s")
 logger.info(f"Dashboard cleanup: interval={_cleanup_config.dashboard_cleanup_interval_seconds}s, "
             f"idle_timeout={_cleanup_config.dashboard_idle_timeout_minutes}min")
+logger.info(f"Job-status reconciler: interval={_cleanup_config.reconciler_interval_seconds}s")
 
 celery_app.conf.beat_schedule = {
     'cleanup-old-jobs': {
@@ -842,6 +864,11 @@ celery_app.conf.beat_schedule = {
     'cleanup-idle-dashboards': {
         'task': 'backend.tasks.cleanup_idle_dashboards',
         'schedule': _cleanup_config.dashboard_cleanup_interval_seconds,
+        'options': {'queue': 'grinn_jobs'},
+    },
+    'reconcile-completed-jobs': {
+        'task': 'backend.tasks.reconcile_completed_jobs',
+        'schedule': _cleanup_config.reconciler_interval_seconds,
         'options': {'queue': 'grinn_jobs'},
     },
 }

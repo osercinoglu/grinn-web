@@ -1,0 +1,50 @@
+07-04-2026:14:39:49,935 INFO     [grinn_workflow.py:4136] Using GROMACS from /usr/local/gromacs/bin
+07-04-2026:14:39:49,953 INFO     [grinn_workflow.py:4167] GROMACS version detected: 2024.1
+07-04-2026:14:39:49,953 INFO     [grinn_workflow.py:4169] GPU support detected
+07-04-2026:14:39:49,953 INFO     [grinn_workflow.py:4171] MPI support detected
+07-04-2026:14:39:49,964 INFO     [grinn_workflow.py:4508] GROMACS environment ready: version 2024.1
+07-04-2026:14:39:49,965 INFO     [grinn_workflow.py:4520] System resources: 64 CPU cores, 125.2 GB memory
+07-04-2026:14:39:49,965 INFO     [grinn_workflow.py:4525] Disk space available: 39.5 GB
+07-04-2026:14:39:49,965 INFO     [grinn_workflow.py:4531] Frame skipping disabled: analyzing all frames
+07-04-2026:14:39:49,965 INFO     [grinn_workflow.py:4543] gRINN workflow was called as follows: 
+07-04-2026:14:39:49,966 INFO     [grinn_workflow.py:4544] grinn_workflow.py /input/4Y2K.pdb /output --ensemble_mode --force_field amber99sb-ildn --water_model tip3p --initpairfiltercutoff 12 --max_frames 200 --nt 4
+07-04-2026:14:39:49,966 INFO     [grinn_workflow.py:4603] ============================================================
+07-04-2026:14:39:49,966 INFO     [grinn_workflow.py:4604] CONFORMATIONAL ENSEMBLE MODE
+07-04-2026:14:39:49,966 INFO     [grinn_workflow.py:4605] ============================================================
+07-04-2026:14:39:49,966 INFO     [grinn_workflow.py:4606] Input: Multi-model PDB file
+07-04-2026:14:39:49,966 INFO     [grinn_workflow.py:4607] Creating XTC trajectory from PDB models...
+07-04-2026:14:39:50,4 INFO     [grinn_workflow.py:4618] Found 1 models in PDB file
+07-04-2026:14:39:50,4 WARNING  [grinn_workflow.py:4637] PDB file contains only 1 model - ensemble mode may not be appropriate
+07-04-2026:14:39:50,4 WARNING  [grinn_workflow.py:4638] Consider using trajectory mode instead
+07-04-2026:14:39:50,16 INFO     [grinn_workflow.py:4642] Saved reference structure: /output/ensemble_reference.pdb
+07-04-2026:14:39:50,16 INFO     [grinn_workflow.py:4646] Created XTC trajectory with 1 frames: /output/ensemble_trajectory.xtc
+07-04-2026:14:39:50,16 INFO     [grinn_workflow.py:4652] Ensemble mode setup complete
+07-04-2026:14:39:50,16 INFO     [grinn_workflow.py:4653]   Reference structure: /output/ensemble_reference.pdb
+07-04-2026:14:39:50,16 INFO     [grinn_workflow.py:4654]   Trajectory: /output/ensemble_trajectory.xtc
+07-04-2026:14:39:50,16 INFO     [grinn_workflow.py:4658] Validating chain IDs for ensemble mode...
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4675] ✓ Valid chain IDs found in ensemble PDB: ['A', 'B']
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4696] ============================================================
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4697] INPUT MODE VALIDATION
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4698] ============================================================
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4701] Mode: Conformational Ensemble
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4702]   Structure: /output/ensemble_reference.pdb
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4703]   Trajectory: /output/ensemble_trajectory.xtc (generated from ensemble)
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:4704]   Topology: Will be generated
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:825] Structure file available - recreating topology with specified parameters
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:826] Using force field: amber99sb-ildn
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:827] Using water model: tip3p
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:718] Recreating topology file using pdb2gmx...
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:719]   Structure file: /output/ensemble_reference.pdb
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:720]   Force field: amber99sb-ildn
+07-04-2026:14:39:50,23 INFO     [grinn_workflow.py:721]   Water model: tip3p
+07-04-2026:14:39:50,112 INFO     [grinn_workflow.py:755] Topology file successfully recreated
+07-04-2026:14:39:50,112 INFO     [grinn_workflow.py:756]   Generated topology: /output/topol_dry.top
+07-04-2026:14:39:50,112 INFO     [grinn_workflow.py:757]   Processed structure: /output/protein_processed.pdb
+07-04-2026:14:39:50,113 INFO     [grinn_workflow.py:4821] Topology handling completed via method: structure_recreation
+07-04-2026:14:39:50,113 INFO     [grinn_workflow.py:4823] Topology file successfully created/recreated
+07-04-2026:14:39:50,113 INFO     [grinn_workflow.py:4826] Copying input structure_file to output_folder as "system_dry.pdb"...
+07-04-2026:14:39:50,113 INFO     [grinn_workflow.py:4833] Topology was recreated - using protein_processed.pdb (with hydrogens) as system_dry.pdb
+07-04-2026:14:39:50,114 INFO     [grinn_workflow.py:1669] Checking chain ID assignment in PDB file...
+07-04-2026:14:39:50,140 INFO     [grinn_workflow.py:1723] Valid chain IDs detected: ['', 'A']
+07-04-2026:14:39:50,140 INFO     [grinn_workflow.py:4858] Trajectory file provided. Processing trajectory file with frame skipping...
+07-04-2026:14:39:50,140 INFO     [grinn_workflow.py:4859] Applying frame skipping (every 1 frames) to trajectory...

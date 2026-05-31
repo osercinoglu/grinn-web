@@ -312,8 +312,36 @@ class DatabaseManager:
             job = session.query(JobModel).filter(JobModel.id == job_id).first()
             if not job:
                 return False
-            
+
             job.results_gcs_path = results_path
+            session.commit()
+            return True
+
+    def set_job_completed(self, job_id: str, *,
+                          completed_at: datetime,
+                          started_at: Optional[datetime] = None,
+                          processing_time_seconds: Optional[int] = None,
+                          current_step: str = 'Job completed successfully') -> bool:
+        """Mark a job COMPLETED with explicit timestamps. Used by the reconciler.
+
+        Distinct from update_job_status() because the reconciler derives the
+        timestamps from the job's calc.log mtime / "Elapsed time" line rather
+        than using "now". started_at is only written if the row didn't already
+        have one.
+        """
+        with self.get_session() as session:
+            job = session.query(JobModel).filter(JobModel.id == job_id).first()
+            if not job:
+                return False
+            job.status = JobStatus.COMPLETED.value
+            job.progress_percentage = 100
+            job.current_step = current_step
+            job.completed_at = completed_at
+            if started_at and not job.started_at:
+                job.started_at = started_at
+            if processing_time_seconds is not None:
+                job.processing_time_seconds = processing_time_seconds
+            job.error_message = None
             session.commit()
             return True
     
@@ -334,6 +362,22 @@ class DatabaseManager:
         """Get jobs by status."""
         with self.get_session() as session:
             return session.query(JobModel).filter(JobModel.status == status.value).limit(limit).all()
+
+    def get_job_ids_by_status(self, status: JobStatus, limit: int = 200) -> List[str]:
+        """Return job IDs (primitive strings) for rows in the given status.
+
+        Use this instead of get_jobs_by_status() when the caller only needs
+        IDs and would otherwise hit SQLAlchemy DetachedInstanceError accessing
+        ORM attributes after the session closes.
+        """
+        with self.get_session() as session:
+            rows = (
+                session.query(JobModel.id)
+                .filter(JobModel.status == status.value)
+                .limit(limit)
+                .all()
+            )
+            return [row[0] for row in rows]
     
     def get_recent_jobs(self, limit: int = 50) -> List[JobModel]:
         """Get recent jobs ordered by creation time."""

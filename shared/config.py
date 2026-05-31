@@ -83,6 +83,7 @@ class Config:
     job_file_retention_hours: float = 72  # 3 days default (supports fractional hours for testing)
     expired_job_retention_days: int = 30  # How long to keep expired job records in database
     cleanup_interval_seconds: float = 21600  # How often cleanup runs (6 hours default, supports fractional for testing)
+    reconciler_interval_seconds: float = 60.0  # How often the job-status reconciler beat task runs
     
     # gRINN Docker settings
     grinn_docker_image: str = "grinn:gromacs-2024.1"
@@ -218,10 +219,21 @@ class Config:
         self.job_file_retention_hours = float(os.getenv("JOB_FILE_RETENTION_HOURS", self.job_file_retention_hours))
         self.expired_job_retention_days = int(os.getenv("EXPIRED_JOB_RETENTION_DAYS", self.expired_job_retention_days))
         self.cleanup_interval_seconds = float(os.getenv("CLEANUP_INTERVAL_SECONDS", self.cleanup_interval_seconds))
-        
+
         # Log warning if cleanup interval is very low (could cause performance issues)
         if self.cleanup_interval_seconds < 60:
             logging.warning(f"CLEANUP_INTERVAL_SECONDS is set to {self.cleanup_interval_seconds}s - this is very frequent and intended for testing only")
+
+        try:
+            self.reconciler_interval_seconds = float(
+                os.getenv("RECONCILER_INTERVAL_SECONDS", self.reconciler_interval_seconds)
+            )
+        except ValueError:
+            logging.warning(
+                f"Invalid RECONCILER_INTERVAL_SECONDS value: "
+                f"{os.getenv('RECONCILER_INTERVAL_SECONDS')!r}. "
+                f"Using default: {self.reconciler_interval_seconds}"
+            )
         
         # gRINN Docker
         self.grinn_docker_image = os.getenv("GRINN_DOCKER_IMAGE", self.grinn_docker_image)

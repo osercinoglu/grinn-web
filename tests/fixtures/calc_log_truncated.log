@@ -1,0 +1,3 @@
+07-04-2026:14:39:50,112 INFO     [grinn_workflow.py:756]   Generated topology: /output/topol_dry.top
+07-04-2026:14:39:50,112 INFO     [grinn_workflow.py:757]   Processed structure: /output/protein_processed.pdb
+07-04-2026:14:39:50,113 INFO     [grinn_workflow.py:4821] Topology handling
