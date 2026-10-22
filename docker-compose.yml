@@ -150,6 +150,13 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    # Opt-in: nothing populates grinn_shared, so started by default this exits 1
+    # ("Missing required files") and crash-loops. Real per-job dashboards are
+    # spawned by dashboard_manager on 8100-8200. Also in "production" because
+    # nginx there depends on it (Compose rejects the profile otherwise).
+    profiles:
+      - dashboard
+      - production
 
   # Nginx Reverse Proxy (optional for production)
   nginx:
