@@ -1,0 +1,20 @@
+# Secrets: never bake env files into images. Containers get .env at runtime
+# via env_file in docker-compose*.yml.
+.env
+.env.*
+
+# VCS, caches and local tooling
+.git
+.worktrees
+.claude
+**/__pycache__
+**/*.pyc
+.pytest_cache
+celerybeat-schedule*
+
+# Not needed at runtime
+tests
+tasks
+docs/superpowers
+request-ports*.sh
+docker-compose-backup.yml

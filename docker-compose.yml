@@ -103,6 +103,8 @@ services:
       dockerfile: Dockerfile.worker
     image: grinn-worker:latest  # Match build-docker.sh tag so both build paths share one image
     user: root  # Required for Docker socket access
+    env_file:
+      - .env  # SMTP, public URLs etc.; entries under environment: take precedence
     environment:
       - DATABASE_URL=postgresql://grinn_user:${POSTGRES_PASSWORD:-grinn_password}@postgres:5432/grinn_web
       - REDIS_HOST=redis

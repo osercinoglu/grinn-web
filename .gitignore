@@ -39,9 +39,6 @@ dump.rdb
 *.log
 logs/
 
-# Docker
-.dockerignore
-
 # IDE
 .vscode/
 .idea/
