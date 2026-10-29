@@ -125,3 +125,57 @@ def reconcile_completed_jobs(db, storage) -> int:
             reconciled,
         )
     return reconciled
+
+
+ABANDONED_SUBMISSION_ERROR = (
+    "Submission was never completed: input files were not fully uploaded "
+    "and the job was never started. Please submit again."
+)
+
+
+def expire_stale_submissions(db, storage, max_age_minutes: float,
+                             now: Optional[datetime] = None) -> int:
+    """Fail jobs abandoned in PENDING/UPLOADING and delete their partial inputs.
+
+    A job sits in PENDING/UPLOADING between create-job and start. If the
+    submitter disappears (closed tab, failed upload, a script that only calls
+    create-job), nothing else ever moves it on, and it keeps counting toward
+    MAX_QUEUED_JOBS. Anything older than ``max_age_minutes`` is abandoned.
+
+    Args:
+        db: A ``DatabaseManager``-like object exposing
+            ``get_stale_submission_job_ids`` and ``fail_job_if_status``.
+        storage: A ``LocalStorageManager``-like object exposing ``delete_job_files``.
+        max_age_minutes: Age past which a PENDING/UPLOADING job is abandoned.
+        now: Injectable clock for tests.
+
+    Returns:
+        The number of jobs marked FAILED in this pass.
+    """
+    from shared.database import JobStatus
+
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(minutes=max_age_minutes)
+    expired = 0
+
+    for job_id in db.get_stale_submission_job_ids(cutoff):
+        try:
+            ok = db.fail_job_if_status(
+                job_id,
+                [JobStatus.PENDING, JobStatus.UPLOADING],
+                error_message=ABANDONED_SUBMISSION_ERROR,
+                current_step="Submission abandoned",
+            )
+            if not ok:
+                continue  # moved on since we listed it
+            storage.delete_job_files(job_id)
+            expired += 1
+        except Exception as exc:  # noqa: BLE001 — defensive per-job guard
+            logger.warning("Stale-submission sweep error on job %s: %s", job_id, exc)
+
+    if expired:
+        logger.info(
+            "Stale-submission sweep: %d job(s) older than %s min marked FAILED",
+            expired, max_age_minutes,
+        )
+    return expired

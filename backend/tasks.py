@@ -839,6 +839,24 @@ def reconcile_completed_jobs():
         return 0
 
 
+@celery_app.task
+def expire_stale_submissions():
+    """Fail jobs abandoned in PENDING/UPLOADING and free their queue slots.
+
+    Thin Celery wrapper around shared.reconciler.expire_stale_submissions.
+    """
+    from shared.reconciler import expire_stale_submissions as _expire_impl
+    local_db_manager = DatabaseManager()
+    local_config = get_config()
+    local_storage_manager = get_storage_manager(local_config.storage_path)
+    try:
+        return _expire_impl(local_db_manager, local_storage_manager,
+                            max_age_minutes=local_config.stale_submission_minutes)
+    except Exception as e:
+        logger.error(f"Stale-submission sweep failed: {str(e)}")
+        return 0
+
+
 # Periodic task to cleanup old jobs
 # Schedule interval is configurable via CLEANUP_INTERVAL_SECONDS (default: 6 hours)
 _cleanup_config = get_config()
@@ -849,6 +867,8 @@ logger.info(f"Worker health monitoring: interval=60s, timeout={_cleanup_config.w
 logger.info(f"Dashboard cleanup: interval={_cleanup_config.dashboard_cleanup_interval_seconds}s, "
             f"idle_timeout={_cleanup_config.dashboard_idle_timeout_minutes}min")
 logger.info(f"Job-status reconciler: interval={_cleanup_config.reconciler_interval_seconds}s")
+logger.info(f"Stale-submission sweep: interval={_cleanup_config.reconciler_interval_seconds}s, "
+            f"max_age={_cleanup_config.stale_submission_minutes}min")
 
 celery_app.conf.beat_schedule = {
     'cleanup-old-jobs': {
@@ -868,6 +888,11 @@ celery_app.conf.beat_schedule = {
     },
     'reconcile-completed-jobs': {
         'task': 'backend.tasks.reconcile_completed_jobs',
+        'schedule': _cleanup_config.reconciler_interval_seconds,
+        'options': {'queue': 'grinn_jobs'},
+    },
+    'expire-stale-submissions': {
+        'task': 'backend.tasks.expire_stale_submissions',
         'schedule': _cleanup_config.reconciler_interval_seconds,
         'options': {'queue': 'grinn_jobs'},
     },

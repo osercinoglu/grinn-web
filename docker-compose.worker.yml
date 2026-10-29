@@ -26,6 +26,7 @@ services:
       
       # Job file retention
       - JOB_FILE_RETENTION_HOURS=${JOB_FILE_RETENTION_HOURS:-72}
+      - STALE_SUBMISSION_MINUTES=${STALE_SUBMISSION_MINUTES:-60}
       
       # gRINN Docker image for computational jobs
       - GRINN_DOCKER_IMAGE=${GRINN_DOCKER_IMAGE:-grinn:gromacs-2024.1}

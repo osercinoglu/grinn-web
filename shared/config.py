@@ -84,6 +84,11 @@ class Config:
     expired_job_retention_days: int = 30  # How long to keep expired job records in database
     cleanup_interval_seconds: float = 21600  # How often cleanup runs (6 hours default, supports fractional for testing)
     reconciler_interval_seconds: float = 60.0  # How often the job-status reconciler beat task runs
+    stale_submission_minutes: float = 60.0  # PENDING/UPLOADING jobs older than this are failed as abandoned
+
+    # Shared secret the Dash frontend sends to the backend API (X-Internal-Token).
+    # Required: protected API routes are denied when it is unset.
+    internal_api_token: str = None
     
     # gRINN Docker settings
     grinn_docker_image: str = "grinn:gromacs-2024.1"
@@ -235,6 +240,19 @@ class Config:
                 f"Using default: {self.reconciler_interval_seconds}"
             )
         
+        try:
+            self.stale_submission_minutes = float(
+                os.getenv("STALE_SUBMISSION_MINUTES", self.stale_submission_minutes)
+            )
+        except ValueError:
+            logging.warning(
+                f"Invalid STALE_SUBMISSION_MINUTES value: "
+                f"{os.getenv('STALE_SUBMISSION_MINUTES')!r}. "
+                f"Using default: {self.stale_submission_minutes}"
+            )
+
+        self.internal_api_token = os.getenv("INTERNAL_API_TOKEN", self.internal_api_token)
+
         # gRINN Docker
         self.grinn_docker_image = os.getenv("GRINN_DOCKER_IMAGE", self.grinn_docker_image)
         self.docker_timeout = int(os.getenv("DOCKER_TIMEOUT", self.docker_timeout))
@@ -378,6 +396,16 @@ class Config:
         if self.dashboard_idle_timeout_minutes < 0:
             errors.append("DASHBOARD_IDLE_TIMEOUT_MINUTES must be non-negative")
         
+        if self.stale_submission_minutes <= 0:
+            errors.append("STALE_SUBMISSION_MINUTES must be positive")
+
+        # Not an error: Celery workers load this config too and never call the API.
+        if not self.internal_api_token:
+            logging.warning(
+                "INTERNAL_API_TOKEN is not set: the backend API will reject all "
+                "non-public requests, including those from the Dash frontend"
+            )
+
         # Log warnings for potentially problematic capacity configurations
         if self.max_queued_jobs < self.max_concurrent_jobs:
             logging.warning(f"MAX_QUEUED_JOBS ({self.max_queued_jobs}) is less than MAX_CONCURRENT_JOBS ({self.max_concurrent_jobs})")

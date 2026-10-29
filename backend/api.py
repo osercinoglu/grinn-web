@@ -29,6 +29,7 @@ from shared.local_storage import get_storage_manager
 from shared.worker_registry import WorkerRegistry, get_worker_registry, generate_registration_token
 from shared.database import DatabaseManager, JobModel, JobStatus as DBJobStatus
 from shared.pdb_validation import MMCIF_NOT_SUPPORTED_ERROR
+from shared.api_auth import check_api_access
 import redis
 
 # Import Celery tasks
@@ -53,6 +54,15 @@ config = get_config()
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend communication
+
+
+@app.before_request
+def require_internal_token():
+    """Reject non-public API calls that lack the frontend's X-Internal-Token."""
+    if check_api_access(request.method, request.path, request.headers, config.internal_api_token):
+        return None
+    logger.warning(f"Rejected unauthenticated API call: {request.method} {request.path}")
+    return jsonify({'error': 'Unauthorized'}), 401
 
 # Global managers
 storage_manager = None
@@ -613,6 +623,35 @@ def start_job_processing(job_id: str):
         
     except Exception as e:
         logger.error(f"Error starting job {job_id}: {e}")
+        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+
+@app.route('/api/jobs/<job_id>/abort', methods=['POST'])
+def abort_job_submission(job_id: str):
+    """
+    Fail a submission that never got started (still PENDING/UPLOADING) and
+    delete its partial inputs. Called by the frontend when submission breaks
+    off midway; jobs that already moved on are left untouched (409).
+    """
+    try:
+        ensure_managers_initialized()
+        data = request.get_json(silent=True) or {}
+        reason = data.get('reason') or 'Submission was aborted before the job started'
+
+        if not database_manager.fail_job_if_status(
+            job_id,
+            [DBJobStatus.PENDING, DBJobStatus.UPLOADING],
+            error_message=reason,
+            current_step="Submission aborted",
+        ):
+            return jsonify({'error': 'Job not found or already started'}), 409
+
+        storage_manager.delete_job_files(job_id)
+        logger.info(f"Aborted submission {job_id}: {reason}")
+        return jsonify({'success': True})
+
+    except Exception as e:
+        logger.error(f"Error aborting job {job_id}: {e}")
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
 
 

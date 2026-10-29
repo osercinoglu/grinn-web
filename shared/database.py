@@ -378,7 +378,44 @@ class DatabaseManager:
                 .all()
             )
             return [row[0] for row in rows]
-    
+
+    def get_stale_submission_job_ids(self, created_before: datetime, limit: int = 500) -> List[str]:
+        """Return IDs of jobs still in PENDING/UPLOADING that were created before the cutoff."""
+        with self.get_session() as session:
+            rows = (
+                session.query(JobModel.id)
+                .filter(
+                    JobModel.status.in_([JobStatus.PENDING.value, JobStatus.UPLOADING.value]),
+                    JobModel.created_at < created_before,
+                )
+                .limit(limit)
+                .all()
+            )
+            return [row[0] for row in rows]
+
+    def fail_job_if_status(self, job_id: str, allowed_statuses: List[JobStatus], *,
+                           error_message: str, current_step: str) -> bool:
+        """Atomically mark a job FAILED, but only if it is still in one of ``allowed_statuses``.
+
+        The status check and the update are a single UPDATE ... WHERE, so a job that
+        moved on concurrently (e.g. /start queued it) is left untouched.
+
+        Returns:
+            True if the row was updated, False if the job is missing or moved on.
+        """
+        with self.get_session() as session:
+            updated = session.query(JobModel).filter(
+                JobModel.id == job_id,
+                JobModel.status.in_([s.value for s in allowed_statuses]),
+            ).update({
+                JobModel.status: JobStatus.FAILED.value,
+                JobModel.error_message: error_message,
+                JobModel.current_step: current_step,
+                JobModel.completed_at: datetime.now(timezone.utc),
+            }, synchronize_session=False)
+            session.commit()
+            return updated == 1
+
     def get_recent_jobs(self, limit: int = 50) -> List[JobModel]:
         """Get recent jobs ordered by creation time."""
         with self.get_session() as session:

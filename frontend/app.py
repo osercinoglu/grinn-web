@@ -38,6 +38,7 @@ from pdb_validation import (  # noqa: F401
     ENSEMBLE_SINGLE_STRUCTURE_ERROR,
     MMCIF_NOT_SUPPORTED_ERROR,
 )
+from api_auth import INTERNAL_TOKEN_HEADER
 
 # Setup logging
 setup_logging()
@@ -45,6 +46,38 @@ logger = logging.getLogger(__name__)
 
 # Initialize config
 config = get_config()
+
+
+class _BackendAPI:
+    """``requests`` wrapper that adds the frontend's X-Internal-Token to every backend call."""
+
+    def _headers(self, kwargs):
+        headers = dict(kwargs.pop('headers', None) or {})
+        headers[INTERNAL_TOKEN_HEADER] = config.internal_api_token or ''
+        return headers
+
+    def get(self, url, **kwargs):
+        return requests.get(url, headers=self._headers(kwargs), **kwargs)
+
+    def post(self, url, **kwargs):
+        return requests.post(url, headers=self._headers(kwargs), **kwargs)
+
+
+backend_api = _BackendAPI()
+
+
+def _abort_submission(job_id: str) -> None:
+    """Fail a job whose submission broke off before /start, and drop its partial inputs."""
+    try:
+        backend_api.post(
+            f"{config.backend_url}/api/jobs/{job_id}/abort",
+            json={'reason': 'Submission did not complete; the job was never started. Please submit again.'},
+            timeout=10,
+        )
+        logger.info(f"Aborted incomplete submission {job_id}")
+    except Exception as e:
+        # The backend's stale-submission sweep will still catch it.
+        logger.error(f"Failed to abort incomplete submission {job_id}: {e}")
 
 # Check if example data is available (mode-specific)
 def _check_example_data_available(path: str) -> bool:
@@ -1745,7 +1778,7 @@ def fetch_gromacs_versions(mode, tab_focus_trigger):
     try:
         # Call the API to get available versions
         backend_url = f"{config.backend_url}/api/gromacs-versions"
-        response = requests.get(backend_url, timeout=5)
+        response = backend_api.get(backend_url, timeout=5)
         
         if response.status_code == 200:
             data = response.json()
@@ -5101,6 +5134,10 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 "Please remove extra files and keep only the multi-model ensemble PDB."
             ], className="alert alert-danger"), no_update, False, no_update
     
+    # Set once create-job succeeds; if we leave before /start succeeds, the
+    # finally block aborts the job so it doesn't linger in PENDING/UPLOADING.
+    job_id = None
+    submitted = False
     try:
         # Job name is optional - will be None if not provided
         job_name = None
@@ -5138,7 +5175,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         backend_url = f"{config.backend_url}/api/create-job"
         logger.info(f"Creating job via {backend_url}")
         
-        response = requests.post(
+        response = backend_api.post(
             backend_url,
             json={
                 'files': files_info,
@@ -5235,7 +5272,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             files = {'file': (file_data['filename'], content, 'application/octet-stream')}
             
             try:
-                upload_response = requests.post(
+                upload_response = backend_api.post(
                     upload_url,
                     files=files,
                     timeout=300  # 5 minutes for large files
@@ -5273,7 +5310,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
         logger.info(f"Starting processing for job {job_id}")
         
         start_url = f"{config.backend_url}/api/jobs/{job_id}/start"
-        start_response = requests.post(start_url, timeout=30)
+        start_response = backend_api.post(start_url, timeout=30)
         
         if start_response.status_code != 200:
             error_msg = start_response.json().get('error', 'Failed to start processing')
@@ -5282,6 +5319,7 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
                 f"Files uploaded but processing failed: {error_msg}"
             ], className="alert alert-danger"), no_update, False, no_update
         
+        submitted = True
         logger.info(f"Job {job_id} submitted successfully")
         
         # Show compact success message with clickable link
@@ -5370,6 +5408,9 @@ def handle_job_submission(submit_clicks, skip_frames, initpairfilter_cutoff,
             html.I(className="fas fa-exclamation-triangle", style={'marginRight': '8px'}),
             f"Error submitting job: {str(e)}"
         ], className="alert alert-danger"), no_update, False, no_update
+    finally:
+        if job_id and not submitted:
+            _abort_submission(job_id)
 
 @app.callback(
     Output('job-submission-modal', 'is_open', allow_duplicate=True),
@@ -5400,7 +5441,7 @@ def update_monitor_page(n_intervals, manual_refresh, dashboard_availability, job
     try:
         # Fetch job details from backend
         backend_url = f"{config.backend_url}/api/jobs/{job_id}"
-        response = requests.get(backend_url, timeout=10)
+        response = backend_api.get(backend_url, timeout=10)
         
         if response.status_code != 200:
             return [
@@ -5560,7 +5601,7 @@ def update_monitor_page(n_intervals, manual_refresh, dashboard_availability, job
         try:
             # Fetch logs from backend API
             logs_url = f"{config.backend_url}/api/jobs/{job_id}/logs"
-            logs_response = requests.get(logs_url, params={'tail': 500}, timeout=5)
+            logs_response = backend_api.get(logs_url, params={'tail': 500}, timeout=5)
             
             if logs_response.status_code == 200:
                 logs_data = logs_response.json()
@@ -5622,7 +5663,7 @@ def update_results_page(job_id):
     try:
         # Fetch job details from backend
         backend_url = f"{config.backend_url}/api/jobs/{job_id}"
-        response = requests.get(backend_url, timeout=10)
+        response = backend_api.get(backend_url, timeout=10)
         
         if response.status_code != 200:
             return html.Div([
@@ -5649,7 +5690,7 @@ def update_results_page(job_id):
         # Fetch detailed results information
         try:
             results_url = f"{config.backend_url}/api/jobs/{job_id}/results"
-            results_response = requests.get(results_url, timeout=10)
+            results_response = backend_api.get(results_url, timeout=10)
             
             if results_response.status_code == 200:
                 results_data = results_response.json()
@@ -5769,7 +5810,7 @@ def handle_download_results(n_clicks, button_id):
     try:
         # Fetch download URLs from backend
         backend_url = f"{config.backend_url}/api/jobs/{job_id}/results"
-        response = requests.get(backend_url, timeout=10)
+        response = backend_api.get(backend_url, timeout=10)
         
         if response.status_code == 200:
             results_data = response.json()
@@ -5822,7 +5863,7 @@ def handle_cancel_job(n_clicks, button_id):
     try:
         # Send cancellation request to backend
         backend_url = f"{config.backend_url}/api/jobs/{job_id}/cancel"
-        response = requests.post(backend_url, timeout=10)
+        response = backend_api.post(backend_url, timeout=10)
         
         if response.status_code == 200:
             logger.info(f"Job {job_id} cancellation requested")
@@ -5859,7 +5900,7 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text, da
         if status_filter and status_filter != 'all':
             params['status'] = status_filter
         
-        response = requests.get(backend_url, params=params, timeout=10)
+        response = backend_api.get(backend_url, params=params, timeout=10)
         
         if response.status_code != 200:
             return html.Div([
@@ -6111,7 +6152,7 @@ def update_job_queue(n_intervals, refresh_clicks, status_filter, search_text, da
 def update_dashboard_availability(n_intervals, n_clicks):
     """Fetch dashboard availability from backend (polled every 2 minutes)."""
     try:
-        response = requests.get(f"{config.backend_url}/api/dashboard/availability", timeout=5)
+        response = backend_api.get(f"{config.backend_url}/api/dashboard/availability", timeout=5)
         if response.status_code == 200:
             return response.json()
     except Exception as e:
@@ -6129,7 +6170,7 @@ def update_dashboard_availability(n_intervals, n_clicks):
 def update_monitor_dashboard_availability(n_intervals):
     """Fetch dashboard availability from backend for monitor page (polled every 2 minutes)."""
     try:
-        response = requests.get(f"{config.backend_url}/api/dashboard/availability", timeout=5)
+        response = backend_api.get(f"{config.backend_url}/api/dashboard/availability", timeout=5)
         if response.status_code == 200:
             return response.json()
     except Exception as e:
@@ -6264,7 +6305,7 @@ def update_dashboard_status(n_intervals, job_id):
         else:
             # Get job details
             job_backend_url = f"{config.backend_url}/api/jobs/{job_id}"
-            job_response = requests.get(job_backend_url, timeout=10)
+            job_response = backend_api.get(job_backend_url, timeout=10)
 
             if job_response.status_code != 200:
                 return html.Div([
@@ -6286,13 +6327,13 @@ def update_dashboard_status(n_intervals, job_id):
         
         # Check dashboard status
         status_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/status"
-        status_response = requests.get(status_url, timeout=10)
+        status_response = backend_api.get(status_url, timeout=10)
         
         # Fetch logs regardless of status (we'll need them for all loading states)
         logs_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/logs"
         logs_text = 'Initializing dashboard container...\nWaiting for logs...'
         try:
-            logs_response = requests.get(logs_url, timeout=5)
+            logs_response = backend_api.get(logs_url, timeout=5)
             if logs_response.status_code == 200:
                 logs_data = logs_response.json()
                 if logs_data.get('success'):
@@ -6314,7 +6355,7 @@ def update_dashboard_status(n_intervals, job_id):
             # Dashboard not started - auto-start it and show terminal
             try:
                 start_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/start"
-                start_response = requests.post(start_url, timeout=30)
+                start_response = backend_api.post(start_url, timeout=30)
                 if start_response.status_code == 200:
                     # Successfully triggered start, show loading screen with terminal
                     return html.Div([
@@ -6464,7 +6505,7 @@ def update_dashboard_status(n_intervals, job_id):
             if not status_data.get('running'):
                 try:
                     start_url = f"{config.backend_url}/api/jobs/{job_id}/dashboard/start"
-                    start_response = requests.post(start_url, timeout=30)
+                    start_response = backend_api.post(start_url, timeout=30)
                     if start_response.status_code != 200:
                         return html.Div([
                             html.Div([
